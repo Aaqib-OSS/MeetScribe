@@ -200,6 +200,7 @@ class SettingsWindow {
     });
 
     document.getElementById('installWhisper').addEventListener('click', () => this.installWhisper());
+    document.getElementById('openSetup').addEventListener('click', () => window.electronAPI.openSetup());
 
     const customModel = document.getElementById('offlineModelCustom');
     customModel.addEventListener('input', () => {

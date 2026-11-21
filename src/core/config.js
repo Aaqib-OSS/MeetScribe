@@ -151,7 +151,10 @@ class ConfigManager {
         startClickThrough: false,
         autoStartRecording: false,
         // Checks GitHub Releases for a newer installed build (packaged app only).
-        autoUpdate: true
+        autoUpdate: true,
+        // The first-run setup assistant has been finished (or Whisper was
+        // already set up). Until then it opens on launch.
+        setupCompleted: false
       },
 
       stealth: {

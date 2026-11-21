@@ -179,6 +179,8 @@ class ApplicationController {
       await this.startOverlay();
       this.starting = false;
       this.isReady = true;
+      // A new install walks through setup instead of failing on the first Record.
+      await this.openSetupIfNeeded();
 
       if (settingsStore.get("autoStartRecording")) {
         setTimeout(() => this.startRecording(), 1200);
@@ -522,6 +524,7 @@ class ApplicationController {
     // looks like the app is idle while it is doing the most useful work it does.
     modelStore.on("progress", (payload) => {
       windowManager.broadcastToAllWindows("model-progress", payload);
+      windowManager.sendToSetup("model-progress", payload);
     });
 
     offlinePass.on("progress", (payload) => {
@@ -575,10 +578,11 @@ class ApplicationController {
     }
 
     if (transcriptionService.isLiveEnabled() && !transcriptionService.isAvailable()) {
-      const message =
-        'Whisper is not set up yet. Open Settings (Ctrl+,) → Transcription → "Install / Repair Whisper".';
+      const message = "MeetScribe is not set up yet. The setup assistant is open; it takes a few minutes.";
       windowManager.broadcastToAllWindows("transcription-error", { message });
       logger.warn(message);
+      // Show the way instead of only describing it.
+      windowManager.showSetup().catch(() => {});
       return null;
     }
 
@@ -1244,6 +1248,31 @@ class ApplicationController {
     ipcMain.handle("models:delete", (_event, id) => this.deleteModel(id));
     ipcMain.handle("models:cancel", (_event, id) => modelStore.cancel(id));
 
+    // ── Setup assistant ──
+    ipcMain.handle("setup:check", () => this.checkSetup());
+    ipcMain.handle("setup:install-python", (event) => {
+      const sender = event.sender;
+      return this.installPython((line) => {
+        try { sender.send("install-progress", line); } catch (_) { /* window gone */ }
+      });
+    });
+    ipcMain.handle("setup:open", async () => {
+      await windowManager.showSetup();
+      return { ok: true };
+    });
+    ipcMain.handle("setup:complete", () => {
+      settingsStore.update({ setupCompleted: true });
+      windowManager.broadcastToAllWindows("load-settings", this.getSettings());
+      return { ok: true };
+    });
+    ipcMain.on("setup:close", () => windowManager.closeSetup());
+    // The overlay's warning: the assistant while Whisper is missing, else Settings.
+    ipcMain.handle("show-help-for-warning", async () => {
+      if (!transcriptionService.getStatus().configured) await windowManager.showSetup();
+      else this.showSettings();
+      return { ok: true };
+    });
+
     ipcMain.handle("whisper:install", async (event, options = {}) => {
       const sender = event.sender;
       const send = (line) => {
@@ -1384,6 +1413,8 @@ class ApplicationController {
         app.getPath("userData"),
       ];
       if (options.gpu) args.push("--gpu");
+      // The setup assistant downloads models itself, with progress and cancel.
+      if (options.noModel) args.push("--no-model");
 
       send(`Running setup (this can take several minutes)...`);
 
@@ -1430,6 +1461,78 @@ class ApplicationController {
         }
       });
     });
+  }
+
+  /** What is installed already, from `setup-whisper.js --check`. */
+  checkSetup() {
+    return new Promise((resolve) => {
+      const { spawn } = require("child_process");
+      const scriptPath = this._unpackedPath(path.join(__dirname, "scripts", "setup-whisper.js"));
+      const child = spawn(process.execPath, [scriptPath, "--check", "--data-dir", app.getPath("userData")], {
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+        windowsHide: true,
+      });
+      let output = "";
+      child.stdout.on("data", (chunk) => { output += chunk.toString(); });
+      child.on("error", (error) => resolve({ ok: false, error: error.message }));
+      child.on("close", () => {
+        const line = output.split(/\r?\n/).find((candidate) => candidate.startsWith("CHECK "));
+        if (!line) return resolve({ ok: false, error: "The setup check gave no answer" });
+        try {
+          const result = JSON.parse(line.slice("CHECK ".length));
+          resolve({ ok: true, ...result, configured: transcriptionService.getStatus().configured });
+        } catch (error) {
+          resolve({ ok: false, error: error.message });
+        }
+      });
+    });
+  }
+
+  /**
+   * Install Python 3.12 for this user with winget (no admin prompt), streaming
+   * its output. setup-whisper.js finds it by its install path afterwards, so
+   * MeetScribe does not need a restart to pick up the new PATH.
+   */
+  installPython(send) {
+    return new Promise((resolve) => {
+      const { spawn } = require("child_process");
+      const args = [
+        "install", "-e", "--id", "Python.Python.3.12", "--scope", "user", "--silent",
+        "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity",
+      ];
+      send("$ winget " + args.join(" "));
+      const child = spawn("winget", args, { windowsHide: true });
+      let lastLine = "";
+      const handle = (chunk) => {
+        // winget redraws a spinner and a bar with \r and block characters.
+        for (const raw of chunk.toString().split(/[\r\n]+/)) {
+          const line = raw.replace(/[\u2580-\u259F|/\\-]{3,}/g, "").replace(/\s+/g, " ").trim();
+          if (line.length < 3 || line === lastLine) continue;
+          lastLine = line;
+          send(line);
+        }
+      };
+      child.stdout.on("data", handle);
+      child.stderr.on("data", handle);
+      child.on("error", (error) => resolve({ ok: false, error: "winget could not start: " + error.message }));
+      child.on("close", (code) => {
+        // 0 = installed; this one = already installed (no newer version).
+        if (code === 0 || code === -1978335189) return resolve({ ok: true });
+        resolve({ ok: false, error: `winget exited with code ${code}` });
+      });
+    });
+  }
+
+  /** On first launch, or from the overlay warning while Whisper is missing. */
+  async openSetupIfNeeded() {
+    if (settingsStore.get("setupCompleted")) return false;
+    if (transcriptionService.getStatus().configured) {
+      // Set up before the assistant existed: nothing to walk through.
+      settingsStore.update({ setupCompleted: true });
+      return false;
+    }
+    await windowManager.showSetup();
+    return true;
   }
 
   _unpackedPath(candidate) {

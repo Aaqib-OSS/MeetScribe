@@ -1262,6 +1262,67 @@ class WindowManager {
     return this.windows.get(type);
   }
 
+  /**
+   * The first-run setup assistant. A normal window on purpose: framed, in the
+   * taskbar, not always on top, and kept out of `this.windows` so click-through,
+   * stealth and "hide all" never touch it. It is not for meetings; it is the
+   * first thing a new user sees and must behave like any other app's installer.
+   */
+  async showSetup() {
+    if (this.setupWindow && !this.setupWindow.isDestroyed()) {
+      if (this.setupWindow.isMinimized()) this.setupWindow.restore();
+      this.setupWindow.show();
+      this.setupWindow.focus();
+      return this.setupWindow;
+    }
+    const window = new BrowserWindow({
+      width: 600,
+      height: 700,
+      minWidth: 480,
+      minHeight: 560,
+      center: true,
+      show: false,
+      title: 'Set up MeetScribe',
+      icon: path.join(__dirname, '..', '..', 'assets', 'brand', 'icon-256.png'),
+      backgroundColor: '#141417',
+      autoHideMenuBar: true,
+      maximizable: false,
+      fullscreenable: false,
+      webPreferences: {
+        ...config.get('window.webPreferences'),
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+    window.setMenuBarVisibility(false);
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    window.webContents.on('will-navigate', (event, url) => {
+      if (url !== window.webContents.getURL()) {
+        event.preventDefault();
+        if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+      }
+    });
+    window.once('ready-to-show', () => window.show());
+    window.on('closed', () => { this.setupWindow = null; });
+    this.setupWindow = window;
+    await window.loadFile(path.join(__dirname, '..', '..', 'setup.html'));
+    logger.info('Setup assistant opened');
+    return window;
+  }
+
+  /** Send to the setup assistant if it is open. */
+  sendToSetup(channel, data) {
+    const window = this.setupWindow;
+    if (window && !window.isDestroyed()) window.webContents.send(channel, data);
+  }
+
+  closeSetup() {
+    if (this.setupWindow && !this.setupWindow.isDestroyed()) this.setupWindow.close();
+  }
+
   getActiveWindow() {
     return this.windows.get(this.activeWindow);
   }
