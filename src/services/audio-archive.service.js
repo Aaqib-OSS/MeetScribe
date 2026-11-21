@@ -185,15 +185,7 @@ class AudioArchiveService {
     this._timeline({ event: 'stop', t: Date.now() });
     this._closeTimeline();
 
-    const meta = {
-      version: 1,
-      meetingFolder: this.folder,
-      startedAt: this.startedAt,
-      stoppedAt: Date.now(),
-      sampleRate: SAMPLE_RATE,
-      channels: CHANNELS,
-      streams
-    };
+    const meta = describeArchive({ folder: this.folder, startedAt: this.startedAt, stoppedAt: Date.now(), streams });
 
     if (streams.length === 0) {
       // Nothing was captured — do not leave an empty audio folder implying otherwise.
@@ -214,17 +206,100 @@ class AudioArchiveService {
     return meta;
   }
 
-  /** Best-effort close for crash/quit paths, where awaiting is not an option. */
+  /**
+   * Best-effort close for crash/quit paths, where awaiting is not an option.
+   * Still writes meta.json (marked interrupted): without it the meeting's
+   * audio is invisible to the Library and can never get a final pass.
+   */
   stopSync() {
     if (!this.active) return;
     this.active = false;
+    const streams = [];
     for (const state of this.streams.values()) {
       try {
         state.writer.end();
         this._patchWavHeader(state.path, state.bytes);
       } catch (_) { /* ignore */ }
+      streams.push({
+        stream: state.streamId,
+        label: this.labels[state.streamId] || state.streamId,
+        path: state.path,
+        bytes: state.bytes,
+        durationMs: Math.round(state.bytes / BYTES_PER_MS),
+        startedAt: state.startedAt,
+        paddedMs: state.gapMs
+      });
     }
     this._closeTimeline();
+    if (!streams.length) return;
+    try {
+      writeMetaFile(this.audioDir, { ...describeArchive({ folder: this.folder, startedAt: this.startedAt, stoppedAt: Date.now(), streams }), interrupted: true });
+    } catch (error) {
+      logger.error('Could not write archive meta.json on quit', { error: error.message });
+    }
+  }
+
+  /**
+   * After a crash: describe a meeting's archive from what is on disk. The WAV
+   * sizes give each stream's length (headers are repaired first), the
+   * timeline's "open" events give when each stream started. Returns the meta
+   * written, or null when there is nothing to recover or it was stopped cleanly.
+   */
+  recover(meetingFolder, labels = {}) {
+    const audioDir = path.join(meetingFolder, 'audio');
+    const metaPath = path.join(audioDir, 'meta.json');
+    if (fs.existsSync(metaPath)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        // A clean stop wrote a complete description; nothing to do.
+        if (!existing.interrupted) return null;
+      } catch (_) { /* unreadable: rebuild it below */ }
+    }
+    let names = [];
+    try {
+      names = fs.readdirSync(audioDir).filter((name) => /^(system|mic)\.wav$/.test(name));
+    } catch (_) {
+      return null;
+    }
+    const opened = {};
+    let startedAt = null;
+    let lastT = null;
+    try {
+      for (const line of fs.readFileSync(path.join(audioDir, 'timeline.jsonl'), 'utf8').split('\n')) {
+        if (!line.trim()) continue;
+        let event;
+        try { event = JSON.parse(line); } catch (_) { continue; }
+        if (event.event === 'start' && startedAt === null) startedAt = event.t;
+        if (event.event === 'open' && event.stream && opened[event.stream] === undefined) opened[event.stream] = event.t;
+        if (typeof event.t === 'number') lastT = event.t;
+      }
+    } catch (_) { /* no timeline: fall back to the file times below */ }
+
+    const streams = [];
+    for (const name of names) {
+      const wavPath = path.join(audioDir, name);
+      this.repairWav(wavPath);
+      const size = fs.statSync(wavPath).size;
+      if (size <= 44) continue;
+      const stream = name.replace(/\.wav$/, '');
+      const bytes = size - 44;
+      streams.push({
+        stream,
+        label: labels[stream] || (stream === 'mic' ? 'You' : 'Them'),
+        path: wavPath,
+        bytes,
+        durationMs: Math.round(bytes / BYTES_PER_MS),
+        startedAt: opened[stream] !== undefined ? opened[stream] : (startedAt || fs.statSync(wavPath).birthtimeMs),
+        paddedMs: 0
+      });
+    }
+    if (!streams.length) return null;
+    const meta = {
+      ...describeArchive({ folder: meetingFolder, startedAt: startedAt || Math.min(...streams.map((s) => s.startedAt)), stoppedAt: lastT || Date.now(), streams }),
+      interrupted: true
+    };
+    writeMetaFile(audioDir, meta);
+    return meta;
   }
 
   /**
@@ -367,6 +442,25 @@ class AudioArchiveService {
     try { fs.closeSync(this.timelineFd); } catch (_) { /* ignore */ }
     this.timelineFd = null;
   }
+}
+
+/** The archive description the final pass and the Library read (meta.json). */
+function describeArchive({ folder, startedAt, stoppedAt, streams }) {
+  return {
+    version: 1,
+    meetingFolder: folder,
+    startedAt,
+    stoppedAt,
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    streams
+  };
+}
+
+function writeMetaFile(audioDir, meta) {
+  const file = path.join(audioDir, 'meta.json');
+  fs.writeFileSync(file + '.tmp', JSON.stringify(meta, null, 2), 'utf8');
+  fs.renameSync(file + '.tmp', file);
 }
 
 module.exports = new AudioArchiveService();

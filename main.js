@@ -197,7 +197,10 @@ class ApplicationController {
       logger.info("Application initialized successfully");
       this.checkForUpdates();
       // After the UI is up: a resumed pass is background work and can wait.
-      setTimeout(() => this.resumePendingFinalPasses(), 5000);
+      setTimeout(() => {
+        this.recoverUnfinishedRecording();
+        this.resumePendingFinalPasses();
+      }, 5000);
     } catch (error) {
       this.starting = false;
       logger.error("Application initialization failed", { error: error.message });
@@ -574,22 +577,53 @@ class ApplicationController {
 
   // ── Recording lifecycle ──
 
+  /**
+   * A warning for the user. While a recording is starting, warnings are held
+   * and sent after "meeting-started", which clears the overlay's old warning;
+   * sent before it they would be wiped at once and a recording that captures
+   * nothing would look normal.
+   */
+  warnUser(message) {
+    logger.warn(message);
+    if (this.startWarnings) this.startWarnings.push(message);
+    else windowManager.broadcastToAllWindows("transcription-error", { message });
+  }
+
+  /**
+   * Start and stop each take seconds (capture, flushing Whisper, closing the
+   * archive). A second press meanwhile used to start a "new" recording into
+   * the same, still-closing meeting and empty its WAV files, so presses during
+   * a transition are ignored.
+   */
   async startRecording() {
+    if (this.recordingTransition) {
+      logger.info("Record ignored: a recording is still " + this.recordingTransition);
+      return meetingService.getStatus();
+    }
     if (transcriptionService.isRecording) return meetingService.getStatus();
+    this.recordingTransition = "starting";
+    this.startWarnings = [];
+    try {
+      return await this._startRecording();
+    } finally {
+      this.recordingTransition = null;
+      const held = this.startWarnings || [];
+      this.startWarnings = null;
+      for (const message of held) windowManager.broadcastToAllWindows("transcription-error", { message });
+    }
+  }
+
+  async _startRecording() {
 
     // Enrollment owns the microphone capture; starting a meeting now would
     // replace it, and the end of enrollment would then stop the meeting's audio.
     if (voiceService.isEnrolling()) {
-      const message = "Voice enrollment is still recording. Start the meeting when it has finished.";
-      windowManager.broadcastToAllWindows("transcription-error", { message });
-      logger.warn(message);
+      this.warnUser("Voice enrollment is still recording. Start the meeting when it has finished.");
       return null;
     }
 
     if (transcriptionService.isLiveEnabled() && !transcriptionService.isAvailable()) {
-      const message = "MeetScribe is not set up yet. The setup assistant is open; it takes a few minutes.";
-      windowManager.broadcastToAllWindows("transcription-error", { message });
-      logger.warn(message);
+      this.warnUser("MeetScribe is not set up yet. The setup assistant is open; it takes a few minutes.");
       // Show the way instead of only describing it.
       windowManager.showSetup().catch(() => {});
       return null;
@@ -604,11 +638,10 @@ class ApplicationController {
           ? "the final pass is turned off"
           : "";
       if (reason) {
-        const message =
+        this.warnUser(
           `The live transcript is off and ${reason}, so this meeting will only be recorded as audio. ` +
-          "Re-run the final pass later to get a transcript.";
-        windowManager.broadcastToAllWindows("transcription-error", { message });
-        logger.warn(message);
+          "Re-run the final pass later to get a transcript."
+        );
       }
     }
 
@@ -616,9 +649,7 @@ class ApplicationController {
     try {
       status = meetingService.start();
     } catch (error) {
-      const message = `Could not create the meeting folder: ${error.message}`;
-      logger.error(message);
-      windowManager.broadcastToAllWindows("transcription-error", { message });
+      this.warnUser(`Could not create the meeting folder: ${error.message}`);
       return null;
     }
 
@@ -632,10 +663,11 @@ class ApplicationController {
           system: settingsStore.get("labelSystem") || "Them",
           mic: settingsStore.get("labelMic") || "You",
         });
+        // Remembered until a clean stop: after a crash or a forced quit the
+        // next launch finishes this meeting's archive and queues its final pass.
+        settingsStore.update({ unfinishedRecording: status.folder });
       } catch (error) {
-        windowManager.broadcastToAllWindows("transcription-error", {
-          message: `Audio archiving is off for this meeting: ${error.message}`,
-        });
+        this.warnUser(`Audio archiving is off for this meeting: ${error.message}`);
       }
     }
 
@@ -652,16 +684,32 @@ class ApplicationController {
   }
 
   async stopRecording() {
+    if (this.recordingTransition) {
+      logger.info("Stop ignored: a recording is still " + this.recordingTransition);
+      return meetingService.getStatus();
+    }
     if (!transcriptionService.isRecording && !meetingService.isActive()) {
       return meetingService.getStatus();
     }
+    this.recordingTransition = "stopping";
+    // Straight away: flushing the last lines takes a few seconds, and a pill
+    // that does not change invites a second press.
+    windowManager.broadcastToAllWindows("recording-stopping", {});
+    try {
+      return await this._stopRecording();
+    } finally {
+      this.recordingTransition = null;
+    }
+  }
 
+  async _stopRecording() {
     await this.stopAudioCapture();
     // Stop transcription after capture so buffered audio still gets flushed.
     await transcriptionService.stop();
     const events = meetingService.getEvents();
     const archive = await audioArchive.stop();
     const status = await meetingService.stop();
+    settingsStore.update({ unfinishedRecording: "" });
 
     windowManager.handleRecordingStopped();
     windowManager.broadcastToAllWindows("meeting-stopped", status);
@@ -810,6 +858,34 @@ class ApplicationController {
     }
   }
 
+  /**
+   * A recording the app never stopped cleanly (crash, power loss, forced
+   * quit): finish its archive description from the files on disk and queue
+   * its final pass, which it would otherwise never get.
+   */
+  recoverUnfinishedRecording() {
+    const folder = settingsStore.get("unfinishedRecording");
+    if (!folder) return;
+    settingsStore.update({ unfinishedRecording: "" });
+    try {
+      const meta = audioArchive.recover(folder, {
+        system: settingsStore.get("labelSystem") || "Them",
+        mic: settingsStore.get("labelMic") || "You",
+      });
+      if (!meta) return;
+      logger.warn("Recovered a recording that was not stopped cleanly", { streams: meta.streams.length });
+      windowManager.broadcastToAllWindows("transcription-error", {
+        message: "The last recording was cut off (the app closed while recording). Its audio is saved" +
+          (settingsStore.get("offlinePassEnabled") && transcriptionService.isAvailable() ? " and its final transcript is being made." : "; re-run it from the Library."),
+      });
+      if (settingsStore.get("offlinePassEnabled") && transcriptionService.isAvailable()) {
+        this.rerunFinalPass(folder).catch((error) => logger.error("Could not queue the recovered recording", { error: error.message }));
+      }
+    } catch (error) {
+      logger.error("Could not recover the last recording", { error: error.message });
+    }
+  }
+
   /** Re-queue the passes that were queued or running when the app last quit. */
   resumePendingFinalPasses() {
     // Left on disk otherwise, so they resume once Whisper is set up again.
@@ -896,9 +972,7 @@ class ApplicationController {
       return result;
     } catch (error) {
       logger.error("Audio capture failed to start", { error: error.message });
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: `Could not start audio capture: ${error.message}`,
-      });
+      this.warnUser(`Could not start audio capture: ${error.message}. Nothing is being recorded; stop and try again.`);
       return null;
     }
   }
@@ -1422,9 +1496,15 @@ class ApplicationController {
       return this.updateAppIcon(iconKey);
     });
 
-    ipcMain.handle("restart-app-for-stealth", () => {
+    // What a quit or restart would interrupt, so Settings can ask first.
+    ipcMain.handle("app:busy", () => this.busyState());
+    ipcMain.handle("restart-app-for-stealth", async () => {
+      logger.info("Restart requested");
+      // Through the normal quit, not app.exit(): that skipped closing the
+      // recording, the transcript and the final-pass process.
+      await this.finishRecordingBeforeQuit();
       app.relaunch();
-      app.exit();
+      this.quit();
     });
 
     ipcMain.on("main-window-ready", () => {
@@ -1437,13 +1517,15 @@ class ApplicationController {
       }
     });
 
-    ipcMain.handle("quit-app", () => {
+    ipcMain.handle("quit-app", async () => {
       logger.info("Quit requested");
+      await this.finishRecordingBeforeQuit();
       this.quit();
     });
 
-    ipcMain.on("quit-app", () => {
+    ipcMain.on("quit-app", async () => {
       logger.info("Quit requested");
+      await this.finishRecordingBeforeQuit();
       this.quit();
     });
   }
@@ -1623,6 +1705,32 @@ class ApplicationController {
     voiceService.shutdown();
     windowManager.destroyAllWindows();
     logger.info("Application shutting down");
+  }
+
+  /** What quitting now would interrupt. */
+  busyState() {
+    const pass = offlinePass.getStatus();
+    return {
+      recording: Boolean(transcriptionService.isRecording || meetingService.isActive()),
+      finalPass: Boolean(pass && pass.running),
+    };
+  }
+
+  /**
+   * Stop a running recording the normal way before quitting, so its archive is
+   * closed and described and its final pass is queued (and resumes on the next
+   * launch). Bounded: a quit must not hang on a stuck worker.
+   */
+  async finishRecordingBeforeQuit() {
+    if (!transcriptionService.isRecording && !this.recordingTransition) return;
+    try {
+      await Promise.race([
+        this.recordingTransition ? new Promise((resolve) => setTimeout(resolve, 8000)) : this.stopRecording(),
+        new Promise((resolve) => setTimeout(resolve, 8000)),
+      ]);
+    } catch (error) {
+      logger.error("Could not stop the recording before quitting", { error: error.message });
+    }
   }
 
   quit() {

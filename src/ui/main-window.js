@@ -102,6 +102,8 @@ class MainWindowUI {
 
     window.electronAPI.onMeetingStopped(() => this.setRecording(false));
     window.electronAPI.onRecordingState(({ recording }) => this.setRecording(recording));
+    // Stopping takes a few seconds (the last lines are still being written).
+    window.electronAPI.onRecordingStopping(() => this.setStopping());
 
     window.electronAPI.onInteractionModeChanged((interactive) => {
       this.status.classList.toggle('passthrough', !interactive);
@@ -118,8 +120,10 @@ class MainWindowUI {
 
     window.electronAPI.onTranscriptionStatus((status) => {
       if (status && status.available === false) {
-        this.setWarning('Setup needed — click here');
-      } else if (status && status.available) {
+        this.setWarning('Setup needed — click here', 'setup');
+      } else if (status && status.available && this.warningKind === 'setup') {
+        // Only the setup warning goes away by itself. Anything else (no audio
+        // captured, archiving off) must stay until the user has seen it.
         this.setWarning('');
       }
     });
@@ -134,7 +138,7 @@ class MainWindowUI {
       }
       const whisper = await window.electronAPI.getWhisperStatus();
       if (whisper && !whisper.configured) {
-        this.setWarning('Setup needed — click here');
+        this.setWarning('Setup needed — click here', 'setup');
       }
     } catch (_) {
       /* main process still starting */
@@ -149,8 +153,18 @@ class MainWindowUI {
     }
   }
 
+  setStopping() {
+    this.stopping = true;
+    this.recordLabel.textContent = 'Stopping…';
+    document.getElementById('recordBtn').disabled = true;
+  }
+
   setRecording(recording) {
     this.recording = recording;
+    if (!recording || this.stopping) {
+      this.stopping = false;
+      document.getElementById('recordBtn').disabled = false;
+    }
     this.dot.classList.toggle('live', recording);
     this.recordLabel.textContent = recording ? 'Stop' : 'Record';
 
@@ -204,8 +218,10 @@ class MainWindowUI {
     }
   }
 
-  setWarning(message) {
+  setWarning(message, kind = 'other') {
+    this.warningKind = message ? kind : null;
     this.warn.textContent = message || '';
+    this.warn.title = message ? message + ' (click for help)' : '';
     this.warn.classList.toggle('show', !!message);
     this.resizeToContent();
   }
