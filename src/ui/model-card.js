@@ -59,6 +59,9 @@
   function status(row) {
     if (row.downloading) return progress(row).label;
     if (row.downloaded) return '✓ On this PC · ' + formatBytes(row.bytes);
+    // Picked for the live or final transcript but not on this PC: the one
+    // state that stops a meeting from being transcribed, so it says so.
+    if ((row.inUse || []).length) return 'Needed, not downloaded yet' + (row.sizeMb ? ' · ' + formatBytes(row.sizeMb * 1e6) : '');
     // A partial download resumes where it stopped.
     if (row.bytes > 0) return 'Incomplete · ' + formatBytes(row.bytes);
     return row.sizeMb ? formatBytes(row.sizeMb * 1e6) + ' download' : 'Not downloaded';
