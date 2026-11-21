@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format based on [Keep a
 
 ### Added
 
+- A dotted grip on the left of the overlay bar to move it, with a grab cursor.
 - A setup assistant opens on first launch. It checks for Python and can install Python 3.12 with one click (winget, no admin rights). It asks what language your meetings are in, then installs the speech engine and both the live and the after-meeting model, with a checklist, progress bars and Cancel. It also opens from Settings → Transcription, from the overlay's warning, and when you press Record before setup.
 - Model cards say what a model is in plain words ("German · Accurate"), with the technical name underneath as a link to its Hugging Face page, a language badge, speed and accuracy ratings, and the time per 1 h meeting. Settings and the Library describe models the same way.
 - Model downloads show a progress bar with "42% · 342 MB of 815 MB" and can be cancelled. A cancelled download leaves nothing behind.

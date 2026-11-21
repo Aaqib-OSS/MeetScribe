@@ -42,6 +42,55 @@ class MainWindowUI {
     // While Whisper is missing this opens the setup assistant, else Settings.
     this.warn.addEventListener('click', () => window.electronAPI.showHelpForWarning());
     this.final.addEventListener('click', () => window.electronAPI.openMeetingFolder());
+    this.bindGrip(document.getElementById('grip'));
+  }
+
+  /**
+   * Drag the overlay by its grip. Screen coordinates, so moving the window
+   * under the pointer does not feed back into the delta. One move is in
+   * flight at a time; whatever the pointer travelled meanwhile goes in the
+   * next one, so a fast drag never queues up stale moves.
+   */
+  bindGrip(grip) {
+    if (!grip) return;
+    let last = null;
+    let pending = { x: 0, y: 0 };
+    let busy = false;
+
+    const flush = async () => {
+      if (busy || (!pending.x && !pending.y)) return;
+      busy = true;
+      const { x, y } = pending;
+      pending = { x: 0, y: 0 };
+      try {
+        await window.electronAPI.moveWindow(x, y);
+      } finally {
+        busy = false;
+        flush();
+      }
+    };
+
+    grip.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      grip.setPointerCapture(event.pointerId);
+      grip.classList.add('dragging');
+      last = { x: event.screenX, y: event.screenY };
+    });
+    grip.addEventListener('pointermove', (event) => {
+      if (!last) return;
+      pending.x += event.screenX - last.x;
+      pending.y += event.screenY - last.y;
+      last = { x: event.screenX, y: event.screenY };
+      flush();
+    });
+    const end = (event) => {
+      if (!last) return;
+      last = null;
+      grip.classList.remove('dragging');
+      if (grip.hasPointerCapture(event.pointerId)) grip.releasePointerCapture(event.pointerId);
+    };
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
   }
 
   bindEvents() {
