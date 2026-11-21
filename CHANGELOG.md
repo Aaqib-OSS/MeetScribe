@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format based on [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- A dotted grip on the left of the overlay bar to move it, with a grab cursor.
+
 ## [1.5.0] - 2026-11-12
 
 ### Added
