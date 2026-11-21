@@ -1099,8 +1099,10 @@ class SettingsWindow {
     list.textContent = '';
 
     // What is on disk comes first, by purpose; everything else hides under one fold.
-    const have = rows.filter((row) => row.downloaded);
-    const rest = rows.filter((row) => !row.downloaded);
+    // On disk, or picked for use (and then needing a download): shown first.
+    const shown = (row) => row.downloaded || (row.inUse || []).length > 0;
+    const have = rows.filter(shown);
+    const rest = rows.filter((row) => !shown(row));
     for (const [category, title] of MODEL_GROUPS) {
       const group = have.filter((row) => (row.category === 'live' ? 'live' : 'final') === category);
       if (!group.length) continue;
@@ -1182,7 +1184,8 @@ class SettingsWindow {
     if (card.note) main.appendChild(note);
 
     const state = document.createElement('span');
-    state.className = 'model-state' + (row.downloaded ? ' ok' : '');
+    const needed = !row.downloaded && (row.inUse || []).length > 0;
+    state.className = 'model-state' + (row.downloaded ? ' ok' : needed ? ' needed' : '');
     state.textContent = card.status;
 
     const error = document.createElement('div');

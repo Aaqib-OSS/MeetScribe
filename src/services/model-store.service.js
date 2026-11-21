@@ -461,6 +461,67 @@ class ModelStore extends EventEmitter {
     });
   }
 
+  /** Whether a model is fully on disk, without listing everything. */
+  isDownloaded(id, modelDir) {
+    const repo = repoFor(id);
+    if (!repo) return false;
+    const entry = catalogEntry(id);
+    const custom = readCustom(modelDir)[repo] || {};
+    const convert = entry ? Boolean(entry.convert) : Boolean(custom.convert);
+    return isComplete(dirFor(modelDir, repo, convert), convert);
+  }
+
+  /** The next end (done, failed, cancelled) of whatever is downloading, for `repo` or any. */
+  _nextEnd(repo = null, onProgress = null) {
+    return new Promise((resolve) => {
+      const handler = (payload) => {
+        if (repo && payload.repo !== repo) return;
+        if (payload.state === 'downloading') {
+          if (onProgress) onProgress(payload);
+          return;
+        }
+        this.off('progress', handler);
+        resolve(payload);
+      };
+      this.on('progress', handler);
+    });
+  }
+
+  /**
+   * Make sure a model is on disk before something needs it (the final pass).
+   * Already there: returns at once. Being downloaded (from Settings, the
+   * Library or another pass): waits for that download instead of fetching the
+   * same files a second time into the same folder. Another model downloading:
+   * waits its turn. Otherwise downloads it, with the usual progress events, so
+   * the download is visible and can be cancelled like any other.
+   * Ids that are not a Hugging Face model (a local folder) are left alone.
+   * @returns {Promise<{ok: true, downloaded: boolean}>} rejects when it cannot be had
+   */
+  async ensure(id, paths, onProgress = null) {
+    const repo = repoFor(id);
+    if (!repo || (id.includes(':') || id.startsWith('/') || id.startsWith('.'))) return { ok: true, downloaded: false };
+    for (;;) {
+      if (this.isDownloaded(id, paths.modelDir)) return { ok: true, downloaded: false };
+      if (!this.downloading) break;
+      const same = this.downloading.repo === repo;
+      const end = await this._nextEnd(same ? repo : this.downloading.repo, same ? onProgress : null);
+      if (same && end.state !== 'done') {
+        throw new Error(end.state === 'cancelled' ? 'The model download was cancelled' : (end.error || 'The model download failed'));
+      }
+    }
+    const listen = (payload) => {
+      if (payload.repo === repo && payload.state === 'downloading' && onProgress) onProgress(payload);
+    };
+    this.on('progress', listen);
+    try {
+      const result = await this.download(id, paths);
+      if (!result || !result.ok) throw new Error(result && result.cancelled ? 'The model download was cancelled' : 'The model download failed');
+      return { ok: true, downloaded: true };
+    } finally {
+      this.off('progress', listen);
+    }
+  }
+
   /**
    * Stop the running download. The 'cancelled' event follows once the process
    * has exited and its partial files are gone.
