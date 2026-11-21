@@ -42,6 +42,7 @@ const STATIC = {
   '/': { file: path.join(ROOT, 'manager.html'), type: 'text/html; charset=utf-8' },
   '/manager.js': { file: path.join(ROOT, 'src', 'ui', 'manager.js'), type: 'text/javascript; charset=utf-8' },
   '/manager.css': { file: path.join(ROOT, 'src', 'ui', 'manager.css'), type: 'text/css; charset=utf-8' },
+  '/model-card.js': { file: path.join(ROOT, 'src', 'ui', 'model-card.js'), type: 'text/javascript; charset=utf-8' },
   '/flags.js': { file: path.join(ROOT, 'src', 'ui', 'flags.js'), type: 'text/javascript; charset=utf-8' },
   '/glossary-budget.js': { file: path.join(ROOT, 'src', 'core', 'glossary-budget.js'), type: 'text/javascript; charset=utf-8' },
   '/meeting-summary-skill.md': { file: path.join(ROOT, 'src', 'ui', 'meeting-summary-skill.md'), type: 'text/markdown; charset=utf-8' },
@@ -387,6 +388,7 @@ class ManagerServer extends EventEmitter {
         if (body.category === 'live' || body.category === 'final') options.category = body.category;
         return this._unwrap(need('downloadModel')(String(body.id || ''), options), () => ({}));
       },
+      'models/cancel': (body) => this._unwrap(need('cancelModel')(String(body.id || '')), () => ({})),
       'models/delete': (body) => this._unwrap(need('deleteModel')(String(body.id || '')), (result) => ({ freed: result.freed || 0 })),
       'models/use': (body) => {
         const key = { live: 'whisperModel', final: 'offlineModel', diff: 'offlineDiffModel' }[body.role];

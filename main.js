@@ -450,6 +450,7 @@ class ApplicationController {
       deleteProfile: (id) => this.deleteProfile(id),
       downloadModel: (id, options) => this.downloadModel(id, options),
       deleteModel: (id) => this.deleteModel(id),
+      cancelModel: (id) => modelStore.cancel(id),
       searchModels: (query) => modelStore.searchHub(query),
       openApp: () => this.leaveLibraryOnly(),
       libraryOnly: () => this.enterLibraryOnly(),
@@ -1241,6 +1242,7 @@ class ApplicationController {
     ipcMain.handle("models:list", () => this.listModels());
     ipcMain.handle("models:download", (_event, id) => this.downloadModel(id));
     ipcMain.handle("models:delete", (_event, id) => this.deleteModel(id));
+    ipcMain.handle("models:cancel", (_event, id) => modelStore.cancel(id));
 
     ipcMain.handle("whisper:install", async (event, options = {}) => {
       const sender = event.sender;

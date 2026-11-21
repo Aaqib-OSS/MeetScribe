@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listModels: () => ipcRenderer.invoke('models:list'),
   downloadModel: (id) => ipcRenderer.invoke('models:download', id),
   deleteModel: (id) => ipcRenderer.invoke('models:delete', id),
+  cancelModelDownload: (id) => ipcRenderer.invoke('models:cancel', id),
   onModelProgress: (cb) => on('model-progress', cb),
 
   // ── Windows ──

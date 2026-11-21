@@ -76,6 +76,12 @@
     return node;
   }
 
+  /** A model's plain name ("German · Accurate") with its technical one in brackets. */
+  function modelTitle(model) {
+    const title = model.title || model.label || model.id;
+    return model.tech && model.tech !== title ? `${title} (${model.tech})` : title;
+  }
+
   // ── Icons ──
   //
   // 24×24 stroke paths drawn for this page. `filled` ones are solid shapes.
@@ -902,7 +908,7 @@
     const settings = { value: '', label: 'As in Settings' };
     const modelOptions = [settings].concat(models.map((model) => ({
       value: model.id,
-      label: model.label + (model.estimate && model.estimate.minutes ? ` (≈ ${Math.max(1, Math.round(model.estimate.minutes))} min per hour of meeting)` : '')
+      label: modelTitle(model) + (model.estimate && model.estimate.minutes ? ` (≈ ${Math.max(1, Math.round(model.estimate.minutes))} min per hour of meeting)` : '')
     })));
     const skipped = ids.length - withAudio.length;
     const edited = withAudio.some((id) => (byId(id) || {}).hasFinal);
@@ -924,7 +930,7 @@
         { name: 'model', label: 'Model', type: 'select', value: '', options: modelOptions },
         { name: 'language', label: 'Language', type: 'select', value: '', options: [settings].concat(LANGUAGES.map(([value, label]) => ({ value, label }))) },
         { name: 'mode', label: 'Mode', type: 'select', value: '', options: [settings, { value: 'fast', label: 'Fast (chunked, in parallel)' }, { value: 'quality', label: 'Quality (one continuous decode)' }] },
-        { name: 'diffModel', label: 'Cross-check with a second model', type: 'select', value: 'settings', options: [{ value: 'settings', label: 'As in Settings' }, { value: 'none', label: 'No cross-check' }].concat(models.map((model) => ({ value: model.id, label: model.label }))) },
+        { name: 'diffModel', label: 'Cross-check with a second model', type: 'select', value: 'settings', options: [{ value: 'settings', label: 'As in Settings' }, { value: 'none', label: 'No cross-check' }].concat(models.map((model) => ({ value: model.id, label: modelTitle(model) }))) },
         {
           name: 'glossaryMode', label: 'Glossary', type: 'select', value: 'keep',
           options: [
@@ -1867,12 +1873,12 @@
   const modelLabel = (id) => {
     if (!id) return 'none';
     const model = (state.models || []).find((entry) => entry.id === id || entry.repo === id);
-    return model ? model.label : id;
+    return model ? modelTitle(model) : id;
   };
 
   function modelOptions(role, { optional = false, current = '' } = {}) {
     const list = (state.models || []).filter((model) => (model.roles || []).includes(role) || model.custom);
-    const options = list.map((model) => ({ value: model.id, label: (model.downloaded ? '✓ ' : '') + model.label + (model.downloaded ? '' : ' (not downloaded)') }));
+    const options = list.map((model) => ({ value: model.id, label: (model.downloaded ? '✓ ' : '') + modelTitle(model) + (model.downloaded ? '' : ' (not downloaded)') }));
     if (current && !options.some((option) => option.value === current)) options.unshift({ value: current, label: current });
     return optional ? [{ value: '', label: 'None' }].concat(options) : options;
   }
@@ -2103,15 +2109,15 @@
   }
 
   function modelRow(model) {
+    const card = window.MeetScribeModelCard.card(model);
     const roles = model.roles || [];
     const uses = { live: 'live', final: 'final pass', diff: 'cross-check' };
     const inUse = (model.inUse || []).map((role) => uses[role]).filter(Boolean);
-    const minutes = model.estimate && model.estimate.minutes ? Math.max(1, Math.round(model.estimate.minutes)) : null;
-    const progress = model.downloading ? Math.round((model.progress || 0) * 100) : null;
     const side = [];
     if (inUse.length) side.push(el('span', { class: 'pill final' }, [icon('check'), 'in use: ' + inUse.join(', ')]));
     if (model.downloading) {
-      side.push(el('span', { class: 'muted small', text: `Downloading… ${progress}%` }));
+      side.push(el('span', { class: 'muted small', text: card.status }));
+      side.push(button('x', 'Cancel', () => cancelDownload(model), 'small'));
     } else if (!model.downloaded) {
       side.push(button('download', `Download${model.sizeMb ? ' · ' + fmtBytes(model.sizeMb * 1e6) : ''}`, () => modelAction('download', model), 'small'));
       // Added from Hugging Face but never (fully) downloaded: let it go again.
@@ -2121,21 +2127,41 @@
       if (roles.includes('final') && !(model.inUse || []).includes('final')) side.push(button('sparkles', 'Use for final', () => useModel(model, 'final'), 'small'));
       side.push(iconButton('trash', 'Delete from this computer', () => modelAction('delete', model), 'danger'));
     }
+    const ratings = [
+      card.speed ? el('span', {}, ['Speed ', el('span', { class: 'dots', text: card.speed })]) : null,
+      card.accuracy ? el('span', {}, ['Accuracy ', el('span', { class: 'dots', text: card.accuracy })]) : null,
+      card.minutes ? el('span', { text: card.minutes }) : null
+    ].filter(Boolean);
+    const percent = card.progress ? card.progress.percent : null;
     return el('div', { class: 'model' + (model.downloaded ? ' have' : ''), dataset: { id: model.id } }, [
       el('div', {}, [
-        el('div', { class: 'name' }, [model.label, model.custom ? el('span', { class: 'pill', text: 'from Hugging Face' }) : null]),
-        el('div', { class: 'note', text: [model.note, model.downloaded ? fmtBytes(model.bytes) + ' on disk' : '', minutes && roles.includes('final') ? `≈ ${minutes} min per hour of meeting` : ''].filter(Boolean).join(' · ') })
+        el('div', { class: 'name' }, [card.title,
+          card.language ? el('span', { class: 'pill lang', text: card.language }) : null,
+          model.custom ? el('span', { class: 'pill', text: 'from Hugging Face' }) : null]),
+        // The technical name links to the model's page for anyone who wants the details.
+        el('div', { class: 'tech' }, [
+          card.url ? el('a', { href: card.url, target: '_blank', rel: 'noopener', title: 'Open this model on Hugging Face', text: card.tech + ' ↗' }) : card.tech,
+          ' · ' + card.purpose,
+          model.downloaded ? ' · ' + fmtBytes(model.bytes) + ' on disk' : ''
+        ]),
+        ratings.length ? el('div', { class: 'ratings' }, ratings) : null,
+        card.note ? el('div', { class: 'note', text: card.note }) : null
       ]),
       el('div', { class: 'side' }, side),
-      model.downloading ? el('div', { class: 'bar' }, el('span', { style: `width:${progress}%` })) : null
+      card.progress ? el('div', { class: 'bar' + (percent === null ? ' indeterminate' : '') },
+        el('span', { style: percent === null ? '' : `width:${Math.max(2, percent)}%` })) : null
     ]);
+  }
+
+  async function cancelDownload(model) {
+    await attempt(() => post('/api/models/cancel', { id: model.id }), 'Could not cancel the download');
   }
 
   async function modelAction(action, model, options = {}) {
     if (action === 'delete') {
       const values = await ask(model.downloaded
-        ? { title: `Delete ${model.label}?`, text: `Frees ${fmtBytes(model.bytes)}. You can download it again later.`, ok: 'Delete', danger: true }
-        : { title: `Remove ${model.label} from the list?`, text: model.bytes ? `Deletes the ${fmtBytes(model.bytes)} downloaded so far.` : 'You can add it again from the search.', ok: 'Remove', danger: true });
+        ? { title: `Delete ${modelTitle(model)}?`, text: `Frees ${fmtBytes(model.bytes)}. You can download it again later.`, ok: 'Delete', danger: true }
+        : { title: `Remove ${modelTitle(model)} from the list?`, text: model.bytes ? `Deletes the ${fmtBytes(model.bytes)} downloaded so far.` : 'You can add it again from the search.', ok: 'Remove', danger: true });
       if (!values) return;
     }
     const result = await attempt(() => post('/api/models/' + action, { id: model.id, ...options }), action === 'delete' ? 'Could not delete the model' : 'Could not start the download');
@@ -2146,7 +2172,7 @@
   async function useModel(model, role) {
     const result = await attempt(() => post('/api/models/use', { id: model.id, role }), 'Could not change the model');
     if (result) {
-      toast(`${model.label} is now the ${role === 'live' ? 'live' : 'final-pass'} model`);
+      toast(`${modelTitle(model)} is now the ${role === 'live' ? 'live' : 'final-pass'} model`);
       loadModels();
     }
   }
@@ -2397,13 +2423,13 @@
         const model = (state.models || []).find((entry) => entry.id === data.id);
         const row = document.querySelector(`.model[data-id="${CSS.escape(data.id)}"]`);
         if (model && row) {
-          model.downloading = true;
-          model.progress = data.progress;
+          Object.assign(model, { downloading: true, progress: data.progress, bytesDone: data.bytes || 0, total: data.total || 0 });
           row.replaceWith(modelRow(model));
         }
       } else {
         if (data.state === 'failed') toast('Download failed: ' + data.error);
         if (data.state === 'done') toast('Model downloaded');
+        if (data.state === 'cancelled') toast('Download cancelled');
         loadModels();
       }
     });

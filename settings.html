@@ -103,7 +103,21 @@
     .model-main { flex: 1; min-width: 0; }
     .model-name { font-size: 11px; color: var(--text); }
     .model-meta { font-size: 10px; color: var(--muted); line-height: 1.4; }
-    .model-state { font-size: 10px; color: var(--muted); white-space: nowrap; }
+    .model.have { border-left: 2px solid #6ee7a8; }
+    .model-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-weight: 600; }
+    .model-lang { font-size: 9px; font-weight: 500; color: var(--text); background: rgba(255,255,255,0.08);
+      border-radius: 4px; padding: 0 5px; }
+    .model-tech { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .model-tech a { color: var(--accent); text-decoration: none; -webkit-app-region: no-drag; }
+    .model-tech a:hover { text-decoration: underline; }
+    .model-ratings { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 10px; color: var(--muted); margin: 2px 0 1px; }
+    .model-rating .dots { color: var(--accent); letter-spacing: 1px; }
+    .model-minutes { color: var(--muted); }
+    .model-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.10); overflow: hidden; position: relative; }
+    .model-bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s ease; }
+    .model-bar.indeterminate span { width: 30%; position: absolute; animation: slide 1.4s ease-in-out infinite; }
+    @keyframes slide { 0% { left: -30%; } 100% { left: 100%; } }
+    .model-state { font-size: 10px; color: var(--muted); max-width: 120px; text-align: right; line-height: 1.35; }
     .model-state.ok { color: #6ee7a8; }
     /* One line of small chips; the summary is the tooltip. */
     .profiles { display: flex; gap: 4px; flex-wrap: nowrap; }
@@ -602,6 +616,7 @@
   </div>
 
   <script src="./src/ui/flags.js"></script>
+  <script src="./src/ui/model-card.js"></script>
   <script src="./src/core/glossary-budget.js"></script>
   <script src="./src/ui/settings-window.js"></script>
 </body>

@@ -76,9 +76,31 @@ function remember(key, value) {
   try { window.localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* not persisted */ }
 }
 
-function formatSize(bytes) {
-  if (!bytes) return '';
-  return bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : Math.round(bytes / 1e6) + ' MB';
+
+function chip(className, text) {
+  const element = document.createElement('span');
+  element.className = className;
+  element.textContent = text;
+  return element;
+}
+
+/** "Speed ●●●○○" with the dots coloured. */
+function rating(label, dots) {
+  const element = document.createElement('span');
+  element.className = 'model-rating';
+  element.append(label + ' ');
+  element.appendChild(chip('dots', dots));
+  return element;
+}
+
+/** A filled bar, or a moving one when the total is unknown (percent null). */
+function progressBar(percent) {
+  const bar = document.createElement('div');
+  bar.className = 'model-bar' + (percent === null ? ' indeterminate' : '');
+  const fill = document.createElement('span');
+  if (percent !== null) fill.style.width = Math.max(2, percent) + '%';
+  bar.appendChild(fill);
+  return bar;
 }
 
 // Flags come from src/ui/flags.js (window.MeetScribeFlags).
@@ -196,11 +218,7 @@ class SettingsWindow {
     });
 
     window.electronAPI.onModelProgress((payload) => {
-      if (payload.state === 'downloading') {
-        const state = document.querySelector('.model[data-repo="' + CSS.escape(payload.repo) + '"] .model-state');
-        if (state) state.textContent = 'Downloading ' + Math.round((payload.progress || 0) * 100) + '%';
-        return;
-      }
+      if (payload.state === 'downloading') return this.updateModelProgress(payload);
       // A failure must stay on screen until it is read, not vanish with the
       // next re-render.
       if (payload.state === 'failed') this.modelErrors[payload.repo] = payload.error || 'Download failed';
@@ -595,6 +613,7 @@ class SettingsWindow {
   }
 
   renderModels(rows) {
+    this.modelRows = rows;
     const list = document.getElementById('modelList');
     list.textContent = '';
 
@@ -635,47 +654,70 @@ class SettingsWindow {
   }
 
   renderModel(row) {
+    const card = window.MeetScribeModelCard.card(row);
     const item = document.createElement('div');
-    item.className = 'model';
+    item.className = 'model' + (row.downloaded ? ' have' : '');
     item.dataset.repo = row.repo;
 
     const main = document.createElement('div');
     main.className = 'model-main';
+
     const name = document.createElement('div');
     name.className = 'model-name';
-    name.textContent = row.label;
+    name.append(card.title);
+    if (card.language) name.appendChild(chip('model-lang', card.language));
     for (const role of row.inUse) {
-      const tag = document.createElement('span');
-      tag.className = 'model-tag';
-      tag.textContent = role === 'live' ? 'live' : role === 'final' ? 'final pass' : 'cross-check';
-      name.appendChild(tag);
+      name.appendChild(chip('model-tag', role === 'live' ? 'in use: live' : role === 'final' ? 'in use: final pass' : 'in use: cross-check'));
     }
-    const meta = document.createElement('div');
-    meta.className = 'model-meta';
-    const parts = [row.note];
-    if (row.roles.includes('final') && row.estimate) {
-      const minutes = Math.max(1, Math.round(row.estimate.minutes));
-      const basis = row.estimate.meetings > 0
-        ? 'from ' + row.estimate.meetings + ' meeting' + (row.estimate.meetings === 1 ? '' : 's')
-        : 'estimate';
-      parts.push('≈ ' + minutes + ' min per 1 h meeting (' + basis + ')');
+
+    // The technical name links to the model's page, for anyone who wants the details.
+    const tech = document.createElement('div');
+    tech.className = 'model-tech';
+    if (card.url) {
+      const link = document.createElement('a');
+      link.href = card.url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.title = 'Open this model on Hugging Face';
+      link.textContent = card.tech + ' ↗';
+      tech.appendChild(link);
+    } else {
+      tech.append(card.tech);
     }
-    meta.textContent = parts.filter(Boolean).join(' · ');
-    main.append(name, meta);
+    tech.append(' · ' + card.purpose);
+
+    const ratings = document.createElement('div');
+    ratings.className = 'model-ratings';
+    if (card.speed) ratings.appendChild(rating('Speed', card.speed));
+    if (card.accuracy) ratings.appendChild(rating('Accuracy', card.accuracy));
+    if (card.minutes) ratings.appendChild(chip('model-minutes', card.minutes));
+
+    const note = document.createElement('div');
+    note.className = 'model-meta';
+    note.textContent = card.note;
+
+    main.append(name, tech);
+    if (ratings.childNodes.length) main.appendChild(ratings);
+    if (card.note) main.appendChild(note);
 
     const state = document.createElement('span');
     state.className = 'model-state' + (row.downloaded ? ' ok' : '');
-    if (row.downloading) state.textContent = 'Downloading ' + Math.round(row.progress * 100) + '%';
-    else if (row.downloaded) state.textContent = '✓ ' + formatSize(row.bytes);
-    // A partial download resumes where it stopped.
-    else if (row.bytes > 0) state.textContent = 'Incomplete · ' + formatSize(row.bytes);
-    else state.textContent = row.sizeMb ? 'Not downloaded · ' + formatSize(row.sizeMb * 1e6) : 'Not downloaded';
+    state.textContent = card.status;
+
+    const error = document.createElement('div');
+    error.className = 'notice error model-error';
+    error.hidden = true;
 
     const button = document.createElement('button');
     button.className = 'action' + (row.downloaded ? ' danger' : '');
     if (row.downloading) {
-      button.textContent = 'Downloading…';
-      button.disabled = true;
+      button.textContent = 'Cancel';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        button.textContent = 'Cancelling…';
+        const result = await window.electronAPI.cancelModelDownload(row.id);
+        if (!result.ok) { button.disabled = false; button.textContent = 'Cancel'; }
+      });
     } else if (row.downloaded) {
       // Two clicks, not a dialog: a stray click must not cost a 3 GB re-download.
       button.textContent = 'Delete';
@@ -687,7 +729,7 @@ class SettingsWindow {
           return;
         }
         const result = await window.electronAPI.deleteModel(row.id);
-        if (!result.ok) state.textContent = result.error;
+        if (!result.ok) this.showModelError(row.repo, error, result.error);
         else this.loadModels();
       });
     } else if (!this.whisperConfigured) {
@@ -697,25 +739,41 @@ class SettingsWindow {
       button.addEventListener('click', () => this.showInstaller());
     } else {
       button.textContent = 'Download';
+      button.className = 'action primary';
       button.addEventListener('click', async () => {
         delete this.modelErrors[row.repo];
         error.hidden = true;
+        button.disabled = true;
         const result = await window.electronAPI.downloadModel(row.id);
-        if (!result.ok) this.showModelError(row.repo, error, result.error);
-        else { button.disabled = true; state.textContent = 'Downloading 0%'; }
+        if (!result.ok) {
+          button.disabled = false;
+          this.showModelError(row.repo, error, result.error);
+        }
+        // Otherwise the first progress event redraws this card with a bar.
       });
     }
 
-    const error = document.createElement('div');
-    error.className = 'notice error model-error';
-    error.hidden = true;
     if (this.modelErrors[row.repo]) this.showModelError(row.repo, error, this.modelErrors[row.repo]);
 
     const line = document.createElement('div');
     line.className = 'model-line';
     line.append(main, state, button);
-    item.append(line, error);
+    item.appendChild(line);
+    if (card.progress) item.appendChild(progressBar(card.progress.percent));
+    item.appendChild(error);
     return item;
+  }
+
+  /** Redraw one card from a progress event, without re-listing every model. */
+  updateModelProgress(payload) {
+    const row = (this.modelRows || []).find((candidate) => candidate.repo === payload.repo);
+    const element = document.querySelector('.model[data-repo="' + CSS.escape(payload.repo) + '"]');
+    if (!row || !element) return this.loadModels();
+    Object.assign(row, { downloading: true, progress: payload.progress, bytesDone: payload.bytes || 0, total: payload.total || 0 });
+    // A download started from the Library may be hiding under the fold.
+    const fold = element.closest('details.model-more');
+    if (fold) fold.open = true;
+    element.replaceWith(this.renderModel(row));
   }
 
   /** A failed download, in words someone can act on, with a way to dismiss it. */
@@ -751,17 +809,35 @@ class SettingsWindow {
     setTimeout(() => button.classList.remove('pulse'), 2400);
   }
 
-  /** "✓" on the dropdown entries that are already on disk. */
+  /**
+   * The model dropdowns use the same names as the cards: every catalog model
+   * that fits the role is offered, labelled "German · Accurate (large-v3-turbo
+   * (German fine-tune))", with "✓" when it is already on disk.
+   */
   markDownloaded(rows) {
-    for (const id of ['whisperModel', 'offlineModel']) {
+    for (const [id, role] of [['whisperModel', 'live'], ['offlineModel', 'final']]) {
       const select = document.getElementById(id);
       if (!select) continue;
+      for (const row of rows) {
+        if (row.custom || !(row.roles || []).includes(role)) continue;
+        if (Array.from(select.options).some((option) => option.value === row.id)) continue;
+        const option = document.createElement('option');
+        option.value = row.id;
+        select.appendChild(option);
+      }
       for (const option of select.options) {
-        if (!option.dataset.label) option.dataset.label = option.textContent;
         const row = rows.find((candidate) => candidate.id === option.value || candidate.repo === option.value);
-        option.textContent = (row && row.downloaded ? '✓ ' : '') + option.dataset.label;
+        if (!row) continue;
+        const label = row.title && row.title !== row.tech ? row.title + ' (' + row.tech + ')' : row.title || row.label;
+        option.textContent = (row.downloaded ? '✓ ' : '') + label;
+      }
+      // A saved choice that only now has an option shows up selected.
+      const saved = this.settings && this.settings[id];
+      if (saved && select.value !== saved && Array.from(select.options).some((option) => option.value === saved)) {
+        select.value = saved;
       }
     }
+    if (this.settings) this.applyCustomModel(this.settings);
   }
 
   async save(patch) {

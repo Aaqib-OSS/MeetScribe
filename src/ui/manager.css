@@ -723,7 +723,15 @@ dialog p { margin: 0 0 12px; font-size: 13px; white-space: pre-line; }
 .model .name { font-weight: 650; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .model .note { color: var(--muted); font-size: 12px; }
 .model .side { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.model .bar { grid-column: 1 / -1; margin-top: 2px; }
+.model .bar { grid-column: 1 / -1; margin-top: 2px; position: relative; }
+.model .bar.indeterminate span { width: 30%; position: absolute; animation: model-slide 1.4s ease-in-out infinite; }
+@keyframes model-slide { 0% { left: -30%; } 100% { left: 100%; } }
+.model .tech { color: var(--muted); font-size: 12px; margin-top: 1px; }
+.model .tech a { color: var(--accent, inherit); text-decoration: none; }
+.model .tech a:hover { text-decoration: underline; }
+.model .ratings { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 12px; margin-top: 3px; }
+.model .ratings .dots { letter-spacing: 1px; color: var(--accent, inherit); }
+.model .pill.lang { font-weight: 500; }
 .model-group-head { display: flex; align-items: baseline; gap: 10px; }
 .model-group-head p { margin: 0 0 10px; }
 
