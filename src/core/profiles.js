@@ -279,6 +279,26 @@ function remove(id, settings = {}) {
   return patch;
 }
 
+/**
+ * Which profile keys the current settings changed against a profile's own
+ * values. Edits are no longer saved into the profile behind the user's back;
+ * this is what the "modified" state shows, with Save / Save as new / Undo.
+ * @param {object|null} profile  from listProfiles / getProfile
+ * @param {object} settings      the full current settings
+ * @returns {string[]}
+ */
+function changedKeys(profile, settings = {}) {
+  if (!profile || !profile.values) return [];
+  const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+  return PROFILE_KEYS.filter((key) => {
+    // A profile that never set a key does not own it.
+    if (!(key in profile.values)) return false;
+    // "No profile" keeps whatever glossary is in use (see select()).
+    if (profile.kind === 'none' && key === 'glossary') return false;
+    return !same(profile.values[key], settings[key]);
+  });
+}
+
 /** A built-in back to its shipped values. */
 function reset(id, settings = {}) {
   if (!BUILTIN.some((profile) => profile.id === id)) throw new Error('Only built-in profiles can be reset');
@@ -313,6 +333,7 @@ module.exports = {
   activeId,
   select,
   recordEdit,
+  changedKeys,
   update,
   create,
   remove,

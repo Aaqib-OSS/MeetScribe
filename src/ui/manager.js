@@ -1993,7 +1993,7 @@
     if (profile.kind === 'none') {
       const values = await ask({
         title: 'Switch to “No profile”?',
-        text: 'Models, language and recording options go back to the multilingual defaults, and project glossaries are unticked. Your glossary text stays. Changes you make afterwards are not saved into any profile; use “Save current settings as a profile” for that.',
+        text: 'Models, language and recording options go back to the multilingual defaults, and project glossaries are unticked. Your glossary text stays. Changes you make afterwards are not saved into any profile; use “New profile” for that.',
         ok: 'Switch'
       });
       if (!values) return;
@@ -2021,18 +2021,41 @@
 
   /** A new profile: from the current settings, or a copy of `source`. */
   async function newProfile(source = null) {
+    // A new profile is made from plain answers; the models follow from them
+    // (src/core/profile-suggest.js, shared with the app's Settings).
+    const suggestApi = window.MeetScribeProfileSuggest;
+    const guided = !source && suggestApi;
+    const answers = guided ? suggestApi.answersFor(state.settingValues || {}) : null;
+    const fields = [
+      { name: 'label', label: 'Name', required: true, value: source ? `${source.label} (copy)` : '', placeholder: 'e.g. Acme weekly' },
+      { name: 'flag', label: 'Flag', type: 'flags', value: source && source.flag !== 'none' ? source.flag : 'custom' }
+    ];
+    if (guided) {
+      fields.push(
+        { name: 'language', label: 'What language are these meetings in?', type: 'select', value: answers.language, options: suggestApi.LANGUAGES },
+        { name: 'live', label: 'Show the transcript live while recording', type: 'checkbox', value: answers.live },
+        { name: 'final', label: 'Make a more accurate transcript after the meeting', type: 'checkbox', value: answers.final },
+        { name: 'preference', label: 'What matters more?', type: 'select', value: answers.preference, options: suggestApi.PREFERENCES }
+      );
+    }
+    fields.push({ name: 'activate', label: 'Make it the active profile', type: 'checkbox', value: !source });
     const values = await ask({
-      title: source ? `Duplicate “${source.label}”` : 'Save current settings as a profile',
-      text: source ? 'A profile of your own with the same values, to change as you like.' : 'Takes your current models, language, glossaries and recording options.',
-      fields: [
-        { name: 'label', label: 'Name', required: true, value: source ? `${source.label} (copy)` : '', placeholder: 'e.g. Acme weekly' },
-        { name: 'flag', label: 'Flag', type: 'flags', value: source && source.flag !== 'none' ? source.flag : 'custom' },
-        { name: 'activate', label: 'Make it the active profile', type: 'checkbox', value: !source }
-      ],
+      title: source ? `Duplicate “${source.label}”` : 'New profile',
+      text: source ? 'A profile of your own with the same values, to change as you like.' : 'Answer a few questions; MeetScribe picks the models. You can change them afterwards with Edit.',
+      fields,
       ok: 'Create'
     });
     if (!values) return;
-    const result = await attempt(() => post('/api/profiles/create', { label: values.label, flag: values.flag, from: source ? source.id : null, activate: values.activate }), 'Could not create the profile');
+    let profileValues = null;
+    if (guided) {
+      try {
+        profileValues = suggestApi.suggest({ language: values.language, live: values.live, final: values.final, preference: values.preference });
+      } catch (error) {
+        toast(error.message);
+        return;
+      }
+    }
+    const result = await attempt(() => post('/api/profiles/create', { label: values.label, flag: values.flag, from: source ? source.id : null, activate: values.activate, values: profileValues }), 'Could not create the profile');
     if (result) {
       toast(`Profile “${values.label.trim()}” created`);
       loadProfiles();
