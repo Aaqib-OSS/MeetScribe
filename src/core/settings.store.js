@@ -81,6 +81,9 @@ class SettingsStore {
       myProfiles: [],
       // Built-in profiles the user deleted (Restore brings them back).
       hiddenProfiles: [],
+      // The meeting folder of a recording that has not been stopped cleanly
+      // yet; set at start, cleared at stop. Left set by a crash.
+      unfinishedRecording: '',
       showTranscriptOnRecord: true,
       folderNamePrefix: '',
       windowGap: config.get('ui.windowGap'),
@@ -88,6 +91,7 @@ class SettingsStore {
       overlayOpacity: config.get('ui.overlayOpacity'),
       startClickThrough: config.get('ui.startClickThrough'),
       autoStartRecording: config.get('ui.autoStartRecording'),
+      globalShortcuts: config.get('ui.globalShortcuts'),
       autoUpdate: config.get('ui.autoUpdate'),
       setupCompleted: config.get('ui.setupCompleted')
     };

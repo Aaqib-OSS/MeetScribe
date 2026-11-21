@@ -125,6 +125,7 @@
     @keyframes slide { 0% { left: -30%; } 100% { left: 100%; } }
     .model-state { font-size: 10px; color: var(--muted); max-width: 120px; text-align: right; line-height: 1.35; }
     .model-state.ok { color: #6ee7a8; }
+    .model-state.needed { color: #ffcf70; }
     /* One line of small chips; the summary is the tooltip. */
     .profiles { display: flex; gap: 4px; flex-wrap: nowrap; }
     .profile { -webkit-app-region: no-drag; display: flex; flex-direction: row; align-items: center; gap: 5px;
@@ -701,6 +702,16 @@
           <input type="checkbox" id="startClickThrough" />
           <label for="startClickThrough">Start in click-through mode</label>
         </div>
+        <div class="hint" style="margin:-4px 0 8px 0;">Click-through lets clicks pass the bar to the window behind it. Hover the bar's dot and click it to make the bar clickable again.</div>
+
+        <div class="check">
+          <input type="checkbox" id="globalShortcuts" />
+          <label for="globalShortcuts">Keyboard shortcuts that work in every app</label>
+        </div>
+        <div class="hint" style="margin:-4px 0 8px 0;">Off by default: they take keys away from other apps. Ctrl+Shift+R record ·
+          Ctrl+Shift+S screenshot · Ctrl+Shift+T transcript · Ctrl+Shift+V hide/show · Alt+A click-through ·
+          Ctrl+Shift+M marker · Ctrl+Shift+O folder · Ctrl+, settings · Ctrl+Arrows move. Some clash with Teams
+          (mute, camera), Zoom (mute, record) and text editing.</div>
 
         <div class="field">
           <button class="action" id="restartApp">Restart app</button>

@@ -39,6 +39,10 @@ class MainWindowUI {
     document.getElementById('libraryBtn').addEventListener('click', () => window.electronAPI.openManager());
     document.getElementById('settingsBtn').addEventListener('click', () => window.electronAPI.showSettings());
     this.status.addEventListener('click', () => window.electronAPI.toggleInteraction());
+    // In click-through mode the pointer still reaches here (forwarded moves):
+    // on the dot, the overlay takes clicks again so the dot can be clicked.
+    this.status.addEventListener('mouseenter', () => window.electronAPI.dotHover(true));
+    this.status.addEventListener('mouseleave', () => window.electronAPI.dotHover(false));
     // While Whisper is missing this opens the setup assistant, else Settings.
     this.warn.addEventListener('click', () => window.electronAPI.showHelpForWarning());
     this.final.addEventListener('click', () => window.electronAPI.openMeetingFolder());
@@ -119,12 +123,14 @@ class MainWindowUI {
 
     window.electronAPI.onMeetingStopped(() => this.setRecording(false));
     window.electronAPI.onRecordingState(({ recording }) => this.setRecording(recording));
+    // Stopping takes a few seconds (the last lines are still being written).
+    window.electronAPI.onRecordingStopping(() => this.setStopping());
 
     window.electronAPI.onInteractionModeChanged((interactive) => {
       this.status.classList.toggle('passthrough', !interactive);
       this.status.title = interactive
-        ? 'Interactive — click to enable click-through (Alt+A)'
-        : 'Click-through — click to make interactive (Alt+A)';
+        ? 'Clicks reach MeetScribe. Click to let clicks pass through the bar to the window behind it.'
+        : 'Clicks pass through the bar. Click this dot to make the bar clickable again.';
     });
 
     window.electronAPI.onTranscriptionError(({ message }) => this.setWarning(message));
@@ -135,8 +141,10 @@ class MainWindowUI {
 
     window.electronAPI.onTranscriptionStatus((status) => {
       if (status && status.available === false) {
-        this.setWarning('Setup needed — click here');
-      } else if (status && status.available) {
+        this.setWarning('Setup needed — click here', 'setup');
+      } else if (status && status.available && this.warningKind === 'setup') {
+        // Only the setup warning goes away by itself. Anything else (no audio
+        // captured, archiving off) must stay until the user has seen it.
         this.setWarning('');
       }
     });
@@ -151,7 +159,7 @@ class MainWindowUI {
       }
       const whisper = await window.electronAPI.getWhisperStatus();
       if (whisper && !whisper.configured) {
-        this.setWarning('Setup needed — click here');
+        this.setWarning('Setup needed — click here', 'setup');
       }
     } catch (_) {
       /* main process still starting */
@@ -166,8 +174,18 @@ class MainWindowUI {
     }
   }
 
+  setStopping() {
+    this.stopping = true;
+    this.recordLabel.textContent = 'Stopping…';
+    document.getElementById('recordBtn').disabled = true;
+  }
+
   setRecording(recording) {
     this.recording = recording;
+    if (!recording || this.stopping) {
+      this.stopping = false;
+      document.getElementById('recordBtn').disabled = false;
+    }
     this.dot.classList.toggle('live', recording);
     this.recordLabel.textContent = recording ? 'Stop' : 'Record';
 
@@ -221,8 +239,10 @@ class MainWindowUI {
     }
   }
 
-  setWarning(message) {
+  setWarning(message, kind = 'other') {
+    this.warningKind = message ? kind : null;
     this.warn.textContent = message || '';
+    this.warn.title = message ? message + ' (click for help)' : '';
     this.warn.classList.toggle('show', !!message);
     this.resizeToContent();
   }

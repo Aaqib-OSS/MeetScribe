@@ -118,6 +118,10 @@ class OfflinePassService extends EventEmitter {
     if (this.child) {
       this.cancelled = true;
       try { this.child.kill(); } catch (_) { /* ignore */ }
+    } else if (this.running && this.downloadingModel) {
+      // Still fetching its model: stop that download (the pass then ends as cancelled).
+      this.cancelled = true;
+      require('./model-store.service').cancel(this.downloadingModel);
     }
   }
 
@@ -260,6 +264,12 @@ class OfflinePassService extends EventEmitter {
     };
 
     try {
+      // A model that is not downloaded yet is fetched here, visibly, instead
+      // of by faster-whisper inside the pass: there it was silent, could race
+      // a download started from Settings for the same files, and a slow one
+      // hit the stall timeout and was reported as a crash.
+      await this._ensureModels(settings, paths);
+      if (this.cancelled) throw new Error('cancelled');
       this._progress('starting', 0, 'Loading the transcription model…');
       const result = await this._spawnPass({ folder, meta, paths, settings, glossary });
       this._progress('merging', 0.97, 'Merging speakers and writing the transcript…');
@@ -291,6 +301,29 @@ class OfflinePassService extends EventEmitter {
       this.running = false;
       this.child = null;
       this.currentFolder = null;
+    }
+  }
+
+  /** The pass's model (and cross-check model) on disk before Python starts. */
+  async _ensureModels(settings, paths) {
+    const modelStore = require('./model-store.service');
+    const ids = [settings.offlineModel || 'large-v3-turbo', settings.offlineDiffModel].filter(Boolean);
+    for (const id of ids) {
+      if (modelStore.isDownloaded(id, paths.modelDir)) continue;
+      const entry = modelStore.catalogEntry(id);
+      const name = (entry && (entry.title || entry.label)) || id;
+      this._progress('starting', 0, 'Downloading the model ' + name + ' first…');
+      this.downloadingModel = id;
+      try {
+        await modelStore.ensure(id, paths, (payload) => {
+          const pct = payload.progress === null || payload.progress === undefined ? null : Math.round(payload.progress * 100);
+          this._progress('starting', 0, 'Downloading ' + name + (pct === null ? '…' : ' ' + pct + '%') + ' (once; later meetings start at once)');
+        });
+      } catch (error) {
+        throw new Error('The model ' + name + ' could not be downloaded: ' + error.message);
+      } finally {
+        this.downloadingModel = null;
+      }
     }
   }
 
