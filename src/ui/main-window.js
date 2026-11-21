@@ -39,6 +39,10 @@ class MainWindowUI {
     document.getElementById('libraryBtn').addEventListener('click', () => window.electronAPI.openManager());
     document.getElementById('settingsBtn').addEventListener('click', () => window.electronAPI.showSettings());
     this.status.addEventListener('click', () => window.electronAPI.toggleInteraction());
+    // In click-through mode the pointer still reaches here (forwarded moves):
+    // on the dot, the overlay takes clicks again so the dot can be clicked.
+    this.status.addEventListener('mouseenter', () => window.electronAPI.dotHover(true));
+    this.status.addEventListener('mouseleave', () => window.electronAPI.dotHover(false));
     // While Whisper is missing this opens the setup assistant, else Settings.
     this.warn.addEventListener('click', () => window.electronAPI.showHelpForWarning());
     this.final.addEventListener('click', () => window.electronAPI.openMeetingFolder());
@@ -106,8 +110,8 @@ class MainWindowUI {
     window.electronAPI.onInteractionModeChanged((interactive) => {
       this.status.classList.toggle('passthrough', !interactive);
       this.status.title = interactive
-        ? 'Interactive — click to enable click-through (Alt+A)'
-        : 'Click-through — click to make interactive (Alt+A)';
+        ? 'Clicks reach MeetScribe. Click to let clicks pass through the bar to the window behind it.'
+        : 'Clicks pass through the bar. Click this dot to make the bar clickable again.';
     });
 
     window.electronAPI.onTranscriptionError(({ message }) => this.setWarning(message));

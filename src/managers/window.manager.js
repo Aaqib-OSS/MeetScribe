@@ -426,8 +426,8 @@ class WindowManager {
   // Apply simplified stealth measures
     this.applyStealthMeasures(window, type);
 
-  // Initialize interaction mode based on current state for ALL windows
-    if (this.isInteractive) {
+  // Initialize interaction mode based on current state (Settings always takes clicks)
+    if (this.isInteractive || type === 'settings') {
       window.setIgnoreMouseEvents(false);
     } else {
       window.setIgnoreMouseEvents(true, { forward: true });
@@ -960,7 +960,9 @@ class WindowManager {
     
     this.windows.forEach((window, type) => {
       if (HEADLESS_WINDOWS.has(type) || window.isDestroyed()) return;
-      if (interactive) {
+      // Settings is opened to be used: it always takes clicks, or with
+      // click-through on it opens and cannot be clicked at all.
+      if (interactive || type === 'settings') {
         // Interactive mode: allow mouse events for all windows
         window.setIgnoreMouseEvents(false);
       } else {
@@ -975,6 +977,15 @@ class WindowManager {
       clickThrough: !interactive,
       affectedWindows: Array.from(this.windows.keys())
     });
+  }
+
+  /** While the pointer is on the overlay's dot, the overlay takes clicks even in click-through mode. */
+  setDotHover(hovering) {
+    if (this.isInteractive) return;
+    const main = this.windows.get('main');
+    if (!main || main.isDestroyed()) return;
+    if (hovering) main.setIgnoreMouseEvents(false);
+    else main.setIgnoreMouseEvents(true, { forward: true });
   }
 
   toggleInteraction() {

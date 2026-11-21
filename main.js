@@ -387,7 +387,18 @@ class ApplicationController {
     );
   }
 
+  /**
+   * System-wide shortcuts. Off by default: they take keys from every other
+   * app while MeetScribe runs, and the defaults collide with meeting apps
+   * (Teams mute and camera, Zoom mute and record) and with plain text editing
+   * (Ctrl+Arrow, Ctrl+Shift+V/T/S). Settings → Appearance turns them on.
+   */
   setupGlobalShortcuts() {
+    globalShortcut.unregisterAll();
+    if (!settingsStore.get("globalShortcuts")) {
+      logger.info("Global shortcuts are off");
+      return;
+    }
     const shortcuts = {
       "CommandOrControl+Shift+R": () => this.toggleRecording(),
       "Alt+R": () => this.toggleRecording(),
@@ -989,6 +1000,10 @@ class ApplicationController {
     // saves, saves as new, or undoes.
     const next = settingsStore.update(patch);
 
+    if ("globalShortcuts" in patch && patch.globalShortcuts !== previous.globalShortcuts && this.overlayCreated && !this.libraryOnly) {
+      this.setupGlobalShortcuts();
+    }
+
     if (patch.appIcon && patch.appIcon !== previous.appIcon) {
       this.updateAppIcon(patch.appIcon);
     }
@@ -1422,6 +1437,11 @@ class ApplicationController {
       return this.updateAppIcon(iconKey);
     });
 
+
+    // Click-through lets clicks pass the overlay, its own dot included. Hovering
+    // the dot catches clicks again for as long as the pointer is on it, so
+    // click-through can be turned off with the mouse (no shortcut needed).
+    ipcMain.on("overlay:dot-hover", (_event, hovering) => windowManager.setDotHover(Boolean(hovering)));
     ipcMain.handle("restart-app-for-stealth", () => {
       app.relaunch();
       app.exit();

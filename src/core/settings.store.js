@@ -88,6 +88,7 @@ class SettingsStore {
       overlayOpacity: config.get('ui.overlayOpacity'),
       startClickThrough: config.get('ui.startClickThrough'),
       autoStartRecording: config.get('ui.autoStartRecording'),
+      globalShortcuts: config.get('ui.globalShortcuts'),
       autoUpdate: config.get('ui.autoUpdate'),
       setupCompleted: config.get('ui.setupCompleted')
     };
