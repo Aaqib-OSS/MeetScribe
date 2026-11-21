@@ -67,6 +67,15 @@ const voiceService = require("./src/services/voice.service");
 const speedStats = require("./src/services/speed-stats.service");
 const windowManager = require("./src/managers/window.manager");
 
+/** Why an update check failed, in words a user can act on. */
+function friendlyUpdateError(error) {
+  const text = String((error && error.message) || error || "");
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|net::|getaddrinfo|socket/i.test(text)) return "No internet connection, or GitHub could not be reached.";
+  if (/404|latest\.yml/i.test(text)) return "No downloadable release was found on GitHub yet.";
+  if (/sha512|checksum|signature/i.test(text)) return "The downloaded update did not check out; it will be fetched again next time.";
+  return text.split("\n")[0].slice(0, 200) || "The update check failed.";
+}
+
 class ApplicationController {
   constructor() {
     this.isReady = false;
@@ -1384,6 +1393,11 @@ class ApplicationController {
 
     // ── Whisper setup ──
     ipcMain.handle("whisper:status", () => transcriptionService.getStatus());
+
+    // ── Updates ──
+    ipcMain.handle("update:status", () => this.updateStatus());
+    ipcMain.handle("update:check", () => this.checkForUpdates({ manual: true }));
+    ipcMain.handle("update:install", () => this.installUpdate());
     ipcMain.handle("models:list", () => this.listModels());
     ipcMain.handle("models:download", (_event, id) => this.downloadModel(id));
     ipcMain.handle("models:delete", (_event, id) => this.deleteModel(id));
@@ -1774,24 +1788,96 @@ class ApplicationController {
 
   // ── Auto-update (installed builds only; GitHub Releases) ──
 
-  checkForUpdates() {
-    if (!app.isPackaged || process.platform !== "win32") return;
-    if (!settingsStore.get("autoUpdate")) {
-      logger.info("Auto-update disabled in settings");
-      return;
-    }
+  /**
+   * Where updating stands, for Settings and the overlay:
+   * { state: idle|checking|none|downloading|ready|error|unsupported, current,
+   *   version, percent, error, checkedAt }
+   */
+  updateStatus() {
+    if (!this.update) this.update = { state: "idle", current: app.getVersion() };
+    return { ...this.update };
+  }
+
+  _setUpdate(patch) {
+    this.update = { ...this.updateStatus(), ...patch };
+    windowManager.broadcastToAllWindows("update-status", this.update);
+    windowManager.sendToSetup && windowManager.sendToSetup("update-status", this.update);
+  }
+
+  /** electron-updater, wired once. Null where updating cannot work (not installed, not Windows). */
+  _updater() {
+    if (this.updater !== undefined) return this.updater;
+    this.updater = null;
+    if (!app.isPackaged || process.platform !== "win32") return null;
     try {
       const { autoUpdater } = require("electron-updater");
       autoUpdater.logger = null;
       autoUpdater.autoDownload = true;
+      // An update that finished downloading still installs on a normal quit.
       autoUpdater.autoInstallOnAppQuit = true;
-      autoUpdater.on("update-available", (info) => logger.info("Update available", { version: info.version }));
-      autoUpdater.on("update-downloaded", (info) => logger.info("Update downloaded, installs on quit", { version: info.version }));
-      autoUpdater.on("error", (error) => logger.warn("Auto-update failed", { error: error.message }));
-      autoUpdater.checkForUpdates().catch((error) => logger.warn("Update check failed", { error: error.message }));
+      autoUpdater.on("checking-for-update", () => this._setUpdate({ state: "checking", error: null }));
+      autoUpdater.on("update-not-available", () => this._setUpdate({ state: "none", checkedAt: Date.now() }));
+      autoUpdater.on("update-available", (info) => {
+        logger.info("Update available", { version: info.version });
+        this._setUpdate({ state: "downloading", version: info.version, percent: 0, checkedAt: Date.now() });
+      });
+      autoUpdater.on("download-progress", (progress) => {
+        this._setUpdate({ state: "downloading", percent: Math.round(progress.percent || 0) });
+      });
+      autoUpdater.on("update-downloaded", (info) => {
+        logger.info("Update downloaded", { version: info.version });
+        this._setUpdate({ state: "ready", version: info.version, percent: 100 });
+      });
+      autoUpdater.on("error", (error) => {
+        logger.warn("Auto-update failed", { error: error.message });
+        this._setUpdate({ state: "error", error: friendlyUpdateError(error), checkedAt: Date.now() });
+      });
+      this.updater = autoUpdater;
     } catch (error) {
       logger.warn("Auto-update unavailable", { error: error.message });
     }
+    return this.updater;
+  }
+
+  /**
+   * Look for a newer release on GitHub and download it in the background.
+   * On launch and every few hours while "check for updates" is on; any time
+   * from Settings' "Check now".
+   */
+  checkForUpdates({ manual = false } = {}) {
+    const updater = this._updater();
+    if (!updater) {
+      this._setUpdate({ state: "unsupported", error: "Updates work in the installed app (MeetScribe-Setup), not when run from the source." });
+      return this.updateStatus();
+    }
+    if (!manual && !settingsStore.get("autoUpdate")) {
+      logger.info("Auto-update disabled in settings");
+      return this.updateStatus();
+    }
+    // Already found and downloaded, or downloading: nothing new to ask.
+    if (["ready", "downloading", "checking"].includes(this.updateStatus().state)) return this.updateStatus();
+    updater.checkForUpdates().catch((error) => {
+      logger.warn("Update check failed", { error: error.message });
+      this._setUpdate({ state: "error", error: friendlyUpdateError(error), checkedAt: Date.now() });
+    });
+    if (!this.updateTimer) {
+      // The app runs for days; a check only at launch would miss releases.
+      this.updateTimer = setInterval(() => this.checkForUpdates(), 4 * 60 * 60 * 1000);
+      this.updateTimer.unref && this.updateTimer.unref();
+    }
+    return this.updateStatus();
+  }
+
+  /** Restart into the downloaded update; never in the middle of a meeting. */
+  installUpdate() {
+    if (this.updateStatus().state !== "ready" || !this.updater) return { ok: false, error: "No update is ready yet" };
+    if (transcriptionService.isRecording || meetingService.isActive()) {
+      return { ok: false, error: "Stop the recording first; the update installs in a few seconds after that." };
+    }
+    logger.info("Installing update", { version: this.update.version });
+    // Silent install, then start the new version. The normal quit path runs first.
+    setImmediate(() => this.updater.quitAndInstall(true, true));
+    return { ok: true };
   }
 
   // ── Disguise (icon + process name) ──

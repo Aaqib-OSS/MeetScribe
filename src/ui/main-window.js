@@ -47,6 +47,23 @@ class MainWindowUI {
     this.warn.addEventListener('click', () => window.electronAPI.showHelpForWarning());
     this.final.addEventListener('click', () => window.electronAPI.openMeetingFolder());
     this.bindGrip(document.getElementById('grip'));
+
+    // A downloaded update shows as a small green button; clicking restarts
+    // into it (refused, with a reason, while recording).
+    this.updateBtn = document.getElementById('updateBtn');
+    this.updateBtn.addEventListener('click', async () => {
+      const result = await window.electronAPI.installUpdate();
+      if (result && result.ok === false) this.setWarning(result.error);
+    });
+    window.electronAPI.onUpdateStatus((status) => this.setUpdate(status));
+    window.electronAPI.getUpdateStatus().then((status) => this.setUpdate(status)).catch(() => {});
+  }
+
+  setUpdate(status) {
+    const ready = Boolean(status && status.state === 'ready');
+    this.updateBtn.hidden = !ready;
+    if (ready) this.updateBtn.textContent = 'Update to ' + status.version;
+    this.resizeToContent();
   }
 
   /**
