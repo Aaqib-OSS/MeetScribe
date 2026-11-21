@@ -87,7 +87,7 @@
       min-width: 36px; text-align: center;
     }
 
-    /* Green = clickable, grey = click-through (Alt+A) */
+    /* Green = clickable, grey = click-through (click the dot to switch) */
     .status {
       -webkit-app-region: no-drag;
       width: 7px; height: 7px; border-radius: 50%;
@@ -141,7 +141,7 @@
         <circle cx="1" cy="10.5" r="1"/><circle cx="5" cy="10.5" r="1"/>
       </svg>
     </span>
-    <button class="item" id="recordBtn" title="Start / stop recording (Ctrl+Shift+R)">
+    <button class="item" id="recordBtn" title="Start / stop recording">
       <span class="dot" id="dot"></span>
       <span id="recordLabel">Record</span>
     </button>
@@ -149,17 +149,17 @@
 
     <span class="divider"></span>
 
-    <button class="item" id="shotBtn" title="Save a screenshot into the meeting folder (Ctrl+Shift+S)">Shot</button>
-    <button class="item" id="transcriptBtn" title="Show / hide the transcript (Ctrl+Shift+T)">Transcript</button>
-    <button class="item" id="folderBtn" title="Open the meeting folder (Ctrl+Shift+O)">Folder</button>
+    <button class="item" id="shotBtn" title="Save a screenshot into the meeting folder">Shot</button>
+    <button class="item" id="transcriptBtn" title="Show / hide the transcript">Transcript</button>
+    <button class="item" id="folderBtn" title="Open the meeting folder">Folder</button>
     <button class="item" id="libraryBtn" title="Open MeetScribe Library in your browser">Library</button>
 
     <span class="divider"></span>
 
-    <button class="item" id="settingsBtn" title="Settings (Ctrl+,)">Settings</button>
+    <button class="item" id="settingsBtn" title="Settings">Settings</button>
     <span class="final" id="final" title="Final pass over the archived audio - click to open the meeting folder"><span class="spin"></span><span id="finalText"></span></span>
     <span class="warn" id="warn" title="Click for help"></span>
-    <span class="status" id="status" title="Click-through toggle (Alt+A)"></span>
+    <span class="status" id="status" title="Click-through toggle"></span>
   </div>
 
   <script src="./src/ui/main-window.js"></script>

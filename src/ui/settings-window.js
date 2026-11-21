@@ -51,7 +51,8 @@ const FIELDS = {
 
   transcriptFontSize: 'number',
   windowGap: 'number',
-  startClickThrough: 'check'
+  startClickThrough: 'check',
+  globalShortcuts: 'check'
 };
 
 // Settings that change what the model list shows.

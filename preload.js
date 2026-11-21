@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateAppIcon: (iconKey) => ipcRenderer.invoke('update-app-icon', iconKey),
   restartAppForStealth: () => ipcRenderer.invoke('restart-app-for-stealth'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
+  dotHover: (hovering) => ipcRenderer.send('overlay:dot-hover', hovering),
   getBusyState: () => ipcRenderer.invoke('app:busy'),
 
   // ── Events (each returns a disposer) ──

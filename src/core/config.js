@@ -150,6 +150,9 @@ class ConfigManager {
         overlayOpacity: 1,
         startClickThrough: false,
         autoStartRecording: false,
+        // System-wide keyboard shortcuts. Off: they collide with meeting apps
+        // and text editing, and most people use the bar's buttons.
+        globalShortcuts: false,
         // Checks GitHub Releases for a newer installed build (packaged app only).
         autoUpdate: true,
         // The first-run setup assistant has been finished (or Whisper was
