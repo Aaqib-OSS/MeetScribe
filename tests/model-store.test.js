@@ -90,3 +90,75 @@ test('cancel with nothing downloading says so', () => {
   const store = new ModelStore();
   assert.equal(store.cancel('tiny').ok, false);
 });
+
+// ── ensure(): the final pass gets its model without racing other downloads ──
+
+const fsEnsure = require('fs');
+const osEnsure = require('os');
+const pathEnsure = require('path');
+
+function fakeCompleteModel(modelDir, repo) {
+  const snapshot = pathEnsure.join(modelDir, 'models--' + repo.replace(/\//g, '--'), 'snapshots', 'rev1');
+  fsEnsure.mkdirSync(snapshot, { recursive: true });
+  fsEnsure.writeFileSync(pathEnsure.join(snapshot, 'model.bin'), 'x');
+  fsEnsure.writeFileSync(pathEnsure.join(snapshot, 'config.json'), '{}');
+}
+
+test('ensure: a model already on disk needs nothing', async () => {
+  const { ModelStore } = require('../src/services/model-store.service');
+  const store = new ModelStore();
+  const modelDir = fsEnsure.mkdtempSync(pathEnsure.join(osEnsure.tmpdir(), 'ms-ensure-'));
+  fakeCompleteModel(modelDir, 'Acme/whisper-small-acme');
+  store.download = () => { throw new Error('must not download'); };
+  assert.deepEqual(await store.ensure('Acme/whisper-small-acme', { modelDir }), { ok: true, downloaded: false });
+  fsEnsure.rmSync(modelDir, { recursive: true, force: true });
+});
+
+test('ensure: waits for the same model already downloading instead of fetching it twice', async () => {
+  const { ModelStore } = require('../src/services/model-store.service');
+  const store = new ModelStore();
+  const modelDir = fsEnsure.mkdtempSync(pathEnsure.join(osEnsure.tmpdir(), 'ms-ensure-'));
+  const repo = 'Acme/whisper-large-acme';
+  store.downloading = { repo };
+  store.download = () => { throw new Error('must not start a second download'); };
+  const seen = [];
+  const pending = store.ensure(repo, { modelDir }, (payload) => seen.push(payload.progress));
+  store.emit('progress', { repo, state: 'downloading', progress: 0.5 });
+  fakeCompleteModel(modelDir, repo);
+  store.downloading = null;
+  store.emit('progress', { repo, state: 'done', progress: 1 });
+  assert.deepEqual(await pending, { ok: true, downloaded: false });
+  assert.deepEqual(seen, [0.5]);
+  fsEnsure.rmSync(modelDir, { recursive: true, force: true });
+});
+
+test('ensure: a failed or cancelled download of that model is an error, not a silent pass', async () => {
+  const { ModelStore } = require('../src/services/model-store.service');
+  const store = new ModelStore();
+  const modelDir = fsEnsure.mkdtempSync(pathEnsure.join(osEnsure.tmpdir(), 'ms-ensure-'));
+  const repo = 'Acme/whisper-large-acme';
+  store.downloading = { repo };
+  const failed = store.ensure(repo, { modelDir });
+  store.downloading = null;
+  store.emit('progress', { repo, state: 'failed', error: 'No space left on device' });
+  await assert.rejects(failed, /No space left/);
+  fsEnsure.rmSync(modelDir, { recursive: true, force: true });
+});
+
+test('ensure: waits for another model to finish, then downloads its own', async () => {
+  const { ModelStore } = require('../src/services/model-store.service');
+  const store = new ModelStore();
+  const modelDir = fsEnsure.mkdtempSync(pathEnsure.join(osEnsure.tmpdir(), 'ms-ensure-'));
+  const repo = 'Acme/whisper-large-acme';
+  store.downloading = { repo: 'Acme/other' };
+  let started = false;
+  store.download = async () => { started = true; fakeCompleteModel(modelDir, repo); return { ok: true }; };
+  const pending = store.ensure(repo, { modelDir });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(started, false, 'must wait for the other download');
+  store.downloading = null;
+  store.emit('progress', { repo: 'Acme/other', state: 'done' });
+  assert.deepEqual(await pending, { ok: true, downloaded: true });
+  assert.equal(started, true);
+  fsEnsure.rmSync(modelDir, { recursive: true, force: true });
+});
