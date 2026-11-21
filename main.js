@@ -1393,6 +1393,8 @@ class ApplicationController {
       });
 
       let pythonPath = null;
+      // The script's own "ERROR ..." line says what to do; the exit code does not.
+      let lastError = null;
       const handle = (chunk) => {
         const text = chunk.toString();
         for (const line of text.split(/\r?\n/)) {
@@ -1400,6 +1402,8 @@ class ApplicationController {
           send(line);
           const match = line.match(/^OK (.+)$/);
           if (match) pythonPath = match[1].trim();
+          const failure = line.match(/^ERROR (.+)$/);
+          if (failure) lastError = failure[1].trim();
         }
       };
 
@@ -1418,7 +1422,9 @@ class ApplicationController {
           send("Whisper is ready.");
           resolve({ ok: true, python: pythonPath });
         } else {
-          resolve({ ok: false, message: `Setup exited with code ${code}` });
+          const message = lastError || `Setup exited with code ${code}`;
+          send(`Setup failed: ${message}`);
+          resolve({ ok: false, message });
         }
       });
     });

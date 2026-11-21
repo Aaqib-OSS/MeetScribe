@@ -87,6 +87,10 @@ class SettingsWindow {
   constructor() {
     this.settings = null;
     this.applying = false;
+    // repo -> message of the last failed download, shown on its row until dismissed.
+    this.modelErrors = {};
+    // Unknown until the first status arrives; Download buttons assume it is set up.
+    this.whisperConfigured = true;
 
     this.bindTabs();
     this.bindFields();
@@ -195,9 +199,13 @@ class SettingsWindow {
       if (payload.state === 'downloading') {
         const state = document.querySelector('.model[data-repo="' + CSS.escape(payload.repo) + '"] .model-state');
         if (state) state.textContent = 'Downloading ' + Math.round((payload.progress || 0) * 100) + '%';
-      } else {
-        this.loadModels();
+        return;
       }
+      // A failure must stay on screen until it is read, not vanish with the
+      // next re-render.
+      if (payload.state === 'failed') this.modelErrors[payload.repo] = payload.error || 'Download failed';
+      else delete this.modelErrors[payload.repo];
+      this.loadModels();
     });
 
     window.electronAPI.onFinalPass((payload) => {
@@ -228,6 +236,8 @@ class SettingsWindow {
     window.electronAPI.onSettingsWindowShown(() => {
       this.load();
       this.refreshDevices();
+      // Models may have been downloaded or deleted from the Library meanwhile.
+      this.loadModels();
     });
 
     window.electronAPI.onAudioLevel(({ streamId, rms }) => {
@@ -506,6 +516,10 @@ class SettingsWindow {
       element.textContent = 'Status unknown';
       return;
     }
+    const wasConfigured = this.whisperConfigured;
+    this.whisperConfigured = Boolean(status.configured);
+    // Download buttons depend on this.
+    if (wasConfigured !== this.whisperConfigured) this.loadModels();
     if (!status.configured) {
       element.textContent = 'Not set up — click "Install / Repair Whisper".';
       const install = document.querySelector('details.section[data-key="install"]');
@@ -530,8 +544,10 @@ class SettingsWindow {
   async installWhisper() {
     const button = document.getElementById('installWhisper');
     const log = document.getElementById('installLog');
+    const banner = document.getElementById('installResult');
     log.textContent = '';
     log.classList.add('show');
+    banner.hidden = true;
     button.disabled = true;
     button.textContent = 'Installing…';
 
@@ -540,10 +556,23 @@ class SettingsWindow {
         gpu: document.getElementById('installGpu').checked,
         model: document.getElementById('whisperModel').value
       });
+      banner.hidden = false;
       if (result.ok) {
         document.getElementById('whisperPython').value = result.python;
+        banner.className = 'notice ok';
+        banner.textContent = 'Whisper is installed. You can download more models below.';
+      } else {
+        banner.className = 'notice error';
+        banner.textContent = 'Install failed: ' + (result.message || result.error || 'unknown error') +
+          '. The log below has the details.';
       }
       this.refreshWhisperStatus();
+      // Setup downloads the live model; its row must not still say "Not downloaded".
+      this.loadModels();
+    } catch (error) {
+      banner.hidden = false;
+      banner.className = 'notice error';
+      banner.textContent = 'Install failed: ' + error.message;
     } finally {
       button.disabled = false;
       button.textContent = 'Install / Repair Whisper';
@@ -661,17 +690,65 @@ class SettingsWindow {
         if (!result.ok) state.textContent = result.error;
         else this.loadModels();
       });
+    } else if (!this.whisperConfigured) {
+      // Downloading runs through the Whisper environment, so it cannot start yet.
+      button.textContent = 'Install Whisper first';
+      button.className = 'action primary';
+      button.addEventListener('click', () => this.showInstaller());
     } else {
       button.textContent = 'Download';
       button.addEventListener('click', async () => {
+        delete this.modelErrors[row.repo];
+        error.hidden = true;
         const result = await window.electronAPI.downloadModel(row.id);
-        if (!result.ok) state.textContent = result.error;
+        if (!result.ok) this.showModelError(row.repo, error, result.error);
         else { button.disabled = true; state.textContent = 'Downloading 0%'; }
       });
     }
 
-    item.append(main, state, button);
+    const error = document.createElement('div');
+    error.className = 'notice error model-error';
+    error.hidden = true;
+    if (this.modelErrors[row.repo]) this.showModelError(row.repo, error, this.modelErrors[row.repo]);
+
+    const line = document.createElement('div');
+    line.className = 'model-line';
+    line.append(main, state, button);
+    item.append(line, error);
     return item;
+  }
+
+  /** A failed download, in words someone can act on, with a way to dismiss it. */
+  showModelError(repo, element, message) {
+    this.modelErrors[repo] = message;
+    element.textContent = '';
+    const text = document.createElement('span');
+    text.textContent = /python environment was not found/i.test(message)
+      ? 'Whisper is not installed yet, so models cannot be downloaded. Install Whisper first.'
+      : message;
+    const close = document.createElement('button');
+    close.className = 'notice-close';
+    close.textContent = '✕';
+    close.title = 'Dismiss';
+    close.addEventListener('click', () => {
+      delete this.modelErrors[repo];
+      element.hidden = true;
+    });
+    element.append(text, close);
+    element.hidden = false;
+  }
+
+  /** Transcription tab, installer section open and in view. */
+  showInstaller() {
+    const tab = document.querySelector('.tab[data-page="whisper"]');
+    if (tab) tab.click();
+    const install = document.querySelector('details.section[data-key="install"]');
+    if (!install) return;
+    install.open = true;
+    install.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const button = document.getElementById('installWhisper');
+    button.classList.add('pulse');
+    setTimeout(() => button.classList.remove('pulse'), 2400);
   }
 
   /** "✓" on the dropdown entries that are already on disk. */
