@@ -46,6 +46,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listProfiles: () => ipcRenderer.invoke('profiles:list'),
   selectProfile: (id) => ipcRenderer.invoke('profiles:select', id),
   resetProfile: (id) => ipcRenderer.invoke('profiles:reset', id),
+  createProfile: (options) => ipcRenderer.invoke('profiles:create', options),
+  updateProfile: (id, values, meta) => ipcRenderer.invoke('profiles:update', id, values, meta),
+  deleteProfile: (id) => ipcRenderer.invoke('profiles:delete', id),
+  restoreBuiltinProfiles: () => ipcRenderer.invoke('profiles:restore-builtins'),
   pickFolder: () => ipcRenderer.invoke('settings:pick-folder'),
   pickPython: () => ipcRenderer.invoke('settings:pick-python'),
   showSettings: () => ipcRenderer.invoke('show-settings'),
@@ -54,9 +58,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Whisper setup ──
   getWhisperStatus: () => ipcRenderer.invoke('whisper:status'),
   installWhisper: (options) => ipcRenderer.invoke('whisper:install', options),
+  checkSetup: () => ipcRenderer.invoke('setup:check'),
+  installPython: () => ipcRenderer.invoke('setup:install-python'),
+  openSetup: () => ipcRenderer.invoke('setup:open'),
+  completeSetup: () => ipcRenderer.invoke('setup:complete'),
+  closeSetup: () => ipcRenderer.send('setup:close'),
+  showHelpForWarning: () => ipcRenderer.invoke('show-help-for-warning'),
   listModels: () => ipcRenderer.invoke('models:list'),
   downloadModel: (id) => ipcRenderer.invoke('models:download', id),
   deleteModel: (id) => ipcRenderer.invoke('models:delete', id),
+  cancelModelDownload: (id) => ipcRenderer.invoke('models:cancel', id),
   onModelProgress: (cb) => on('model-progress', cb),
 
   // ── Windows ──

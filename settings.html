@@ -84,12 +84,40 @@
     .hint { color: var(--muted); font-size: 10px; line-height: 1.5; margin-top: 4px; }
 
     .models { display: flex; flex-direction: column; gap: 4px; }
-    .model { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    .model { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px;
       border: 1px solid var(--border); border-radius: 6px; background: var(--field); }
+    .model-line { display: flex; align-items: center; gap: 8px; }
+    .notice { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; line-height: 1.45;
+      padding: 6px 8px; border-radius: 6px; border: 1px solid; margin-top: 6px; white-space: normal; }
+    .notice[hidden] { display: none; }
+    .notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .notice.error { color: #ffcfcb; background: rgba(255,90,80,0.10); border-color: rgba(255,90,80,0.35); }
+    .notice.ok { color: #c4f5da; background: rgba(110,231,168,0.10); border-color: rgba(110,231,168,0.35); }
+    .model-error { margin-top: 0; }
+    .notice-close { background: none; border: none; color: inherit; cursor: pointer; font-size: 11px;
+      padding: 0 2px; opacity: 0.7; -webkit-app-region: no-drag; }
+    .notice-close:hover { opacity: 1; }
+    @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(111,180,255,0); }
+      50% { box-shadow: 0 0 0 4px rgba(111,180,255,0.45); } }
+    button.pulse { animation: pulse 0.8s ease-in-out 3; }
     .model-main { flex: 1; min-width: 0; }
     .model-name { font-size: 11px; color: var(--text); }
     .model-meta { font-size: 10px; color: var(--muted); line-height: 1.4; }
-    .model-state { font-size: 10px; color: var(--muted); white-space: nowrap; }
+    .model.have { border-left: 2px solid #6ee7a8; }
+    .model-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-weight: 600; }
+    .model-lang { font-size: 9px; font-weight: 500; color: var(--text); background: rgba(255,255,255,0.08);
+      border-radius: 4px; padding: 0 5px; }
+    .model-tech { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .model-tech a { color: var(--accent); text-decoration: none; -webkit-app-region: no-drag; }
+    .model-tech a:hover { text-decoration: underline; }
+    .model-ratings { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 10px; color: var(--muted); margin: 2px 0 1px; }
+    .model-rating .dots { color: var(--accent); letter-spacing: 1px; }
+    .model-minutes { color: var(--muted); }
+    .model-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.10); overflow: hidden; position: relative; }
+    .model-bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s ease; }
+    .model-bar.indeterminate span { width: 30%; position: absolute; animation: slide 1.4s ease-in-out infinite; }
+    @keyframes slide { 0% { left: -30%; } 100% { left: 100%; } }
+    .model-state { font-size: 10px; color: var(--muted); max-width: 120px; text-align: right; line-height: 1.35; }
     .model-state.ok { color: #6ee7a8; }
     /* One line of small chips; the summary is the tooltip. */
     .profiles { display: flex; gap: 4px; flex-wrap: nowrap; }
@@ -104,6 +132,32 @@
     .profile .flag svg { display: block; width: 100%; height: 100%; }
     .profile .p-name { font-size: 10.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .profile .p-sum { display: none; }
+    .profile.add { flex: 0 0 auto; color: var(--accent); justify-content: center; font-size: 10.5px; font-weight: 600; }
+    .profile.modified .p-name::after { content: ' •'; color: #ffcf70; }
+    .profile-detail { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--field); }
+    .profile-detail .pd-head { display: flex; align-items: center; gap: 8px; }
+    .profile-detail .pd-head b { font-size: 12px; flex: 1; }
+    .profile-detail dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin-top: 6px; font-size: 11px; }
+    .profile-detail dt { color: var(--muted); }
+    .profile-detail dd { color: var(--text); }
+    .profile-detail dd .need { color: #ffcf70; }
+    .notice.warn { color: #ffe3a8; background: rgba(255,200,90,0.08); border-color: rgba(255,200,90,0.30); flex-direction: column; }
+    .notice.info { color: #cfe5ff; background: rgba(111,180,255,0.08); border-color: rgba(111,180,255,0.30); flex-direction: column; }
+    .notice .notice-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .notice .dl-line { display: flex; flex-direction: column; gap: 3px; width: 100%; }
+    .profile-editor h2 { font-size: 13px; font-weight: 600; margin: 8px 0 2px; }
+    .flag-pick { display: flex; flex-wrap: wrap; gap: 5px; }
+    .flag-pick button { -webkit-app-region: no-drag; width: 30px; height: 22px; padding: 2px; border-radius: 4px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--field); }
+    .flag-pick button.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .flag-pick svg { display: block; width: 100%; height: 100%; border-radius: 2px; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .seg button { -webkit-app-region: no-drag; background: var(--field); border: none; color: var(--muted); cursor: pointer;
+      font-family: inherit; font-size: 11px; padding: 4px 14px; }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button.on { background: rgba(111,180,255,0.18); color: var(--text); }
+    .pe-plan { font-size: 11px; color: var(--muted); padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px; line-height: 1.6; }
+    .pe-plan b { color: var(--text); font-weight: 600; }
     .profile-foot { display: flex; justify-content: space-between; gap: 8px; padding: 6px 2px 0; font-size: 10px; color: var(--muted); }
     .profile-foot button { background: none; border: none; color: var(--accent); cursor: pointer;
       font-family: inherit; font-size: 10px; padding: 0; -webkit-app-region: no-drag; }
@@ -174,10 +228,67 @@
     <main>
       <!-- Profiles -->
       <section class="page" id="page-profiles">
-        <div class="profiles" id="profileCards"></div>
-        <div class="profile-foot"><span id="profileHint">Pick a profile to preselect the other tabs.</span>
-          <button id="resetProfile" hidden>Reset this profile</button></div>
-        <div class="hint" style="margin-top:10px;">Make, edit and delete profiles in MeetScribe Library (the Library button).</div>
+        <div id="profileView">
+          <div class="profiles" id="profileCards"></div>
+          <div class="profile-detail" id="profileDetail"></div>
+          <div class="notice warn" id="profileChanged" hidden></div>
+          <div class="notice info" id="profileMissing" hidden></div>
+          <div class="profile-foot"><span id="profileHint">Pick a profile to preselect the other tabs.</span>
+            <span><button id="resetProfile" hidden>Reset to built-in values</button>
+            <button id="restoreProfiles" hidden>Restore built-in profiles</button></span></div>
+        </div>
+
+        <!-- New / edit profile: plain questions; the models follow from the answers. -->
+        <div id="profileEditor" class="profile-editor" hidden>
+          <h2 id="peTitle">New profile</h2>
+          <div class="field">
+            <label for="peName">Name</label>
+            <input type="text" id="peName" maxlength="40" placeholder="e.g. Weekly team call" />
+          </div>
+          <div class="field">
+            <label>Flag</label>
+            <div class="flag-pick" id="peFlags"></div>
+          </div>
+          <div class="field">
+            <label for="peLanguage">What language are these meetings in?</label>
+            <select id="peLanguage"></select>
+          </div>
+          <div class="field">
+            <label>Show the transcript live while recording?</label>
+            <div class="seg" data-name="live"><button data-value="yes">Yes</button><button data-value="no">No</button></div>
+          </div>
+          <div class="field">
+            <label>Make a more accurate transcript after the meeting?</label>
+            <div class="seg" data-name="final"><button data-value="yes">Yes</button><button data-value="no">No</button></div>
+          </div>
+          <div class="field">
+            <label for="pePreference">What matters more?</label>
+            <select id="pePreference"></select>
+          </div>
+          <div class="pe-plan" id="pePlan"></div>
+          <details class="section" id="peAdvanced">
+            <summary>Advanced: pick the models yourself</summary>
+            <div class="field">
+              <label for="peLiveModel">Live model</label>
+              <select id="peLiveModel"></select>
+            </div>
+            <div class="field">
+              <label for="peFinalModel">After-meeting model</label>
+              <select id="peFinalModel"></select>
+            </div>
+            <div class="field">
+              <label for="peFolder">Meeting folder name</label>
+              <input type="text" id="peFolder" maxlength="40" placeholder="e.g. Standup (empty = just the date)" />
+            </div>
+          </details>
+          <div class="notice error" id="peError" hidden></div>
+          <div class="row" style="justify-content:flex-end; margin-top:12px;">
+            <button class="action danger" id="peDelete" hidden>Delete profile</button>
+            <span style="flex:1"></span>
+            <button class="action" id="peCancel">Cancel</button>
+            <button class="action primary" id="peSave">Save and use</button>
+          </div>
+        </div>
       </section>
 
       <!-- Recording -->
@@ -188,7 +299,7 @@
             <input type="text" id="transcriptRoot" readonly />
             <button class="action" id="browseFolder">Browse</button>
             <button class="action" id="openFolder">Open</button>
-            <button class="action" id="openManager" title="Browse, search and play your meetings in the browser">Open Manager</button>
+            <button class="action" id="openManager" title="Browse, search and play your meetings in the browser">Open Library</button>
           </div>
           <div class="hint">Each meeting gets its own folder containing transcript.txt and any screenshots.</div>
         </div>
@@ -368,6 +479,10 @@
         <details class="section" data-key="install">
           <summary>Whisper installation</summary>
         <div class="field">
+          <div class="row between" style="margin-bottom:8px;">
+            <span class="hint" style="margin:0;">New here, or something broke? The assistant walks through everything.</span>
+            <button class="action primary" id="openSetup">Setup assistant</button>
+          </div>
           <label for="whisperPython">Python (Whisper environment)</label>
           <div class="row">
             <input type="text" id="whisperPython" readonly />
@@ -380,6 +495,7 @@
             </label>
           </div>
           <div class="status-line" id="whisperStatus">Checking…</div>
+          <div class="notice" id="installResult" hidden></div>
           <div class="log" id="installLog"></div>
         </div>
         </details>
@@ -483,7 +599,7 @@
           <label>Models on this PC</label>
           <div class="models" id="modelList"><div class="hint">Loading…</div></div>
           <div class="hint">Time per 1-hour meeting starts from a benchmark and adjusts to this PC
-            and your meetings after every final pass. Live-only models show no estimate.</div>
+            and your meetings after every final pass. For a live model it is how much work it takes, not a wait.</div>
         </div>
 
         <details class="section" data-key="final-speed">
@@ -587,6 +703,8 @@
   </div>
 
   <script src="./src/ui/flags.js"></script>
+  <script src="./src/ui/model-card.js"></script>
+  <script src="./src/core/profile-suggest.js"></script>
   <script src="./src/core/glossary-budget.js"></script>
   <script src="./src/ui/settings-window.js"></script>
 </body>

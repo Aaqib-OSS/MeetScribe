@@ -79,6 +79,8 @@ class SettingsStore {
       profiles: {},
       // The user's own profiles: [{ id, label, flag, values }].
       myProfiles: [],
+      // Built-in profiles the user deleted (Restore brings them back).
+      hiddenProfiles: [],
       showTranscriptOnRecord: true,
       folderNamePrefix: '',
       windowGap: config.get('ui.windowGap'),
@@ -86,7 +88,8 @@ class SettingsStore {
       overlayOpacity: config.get('ui.overlayOpacity'),
       startClickThrough: config.get('ui.startClickThrough'),
       autoStartRecording: config.get('ui.autoStartRecording'),
-      autoUpdate: config.get('ui.autoUpdate')
+      autoUpdate: config.get('ui.autoUpdate'),
+      setupCompleted: config.get('ui.setupCompleted')
     };
   }
 

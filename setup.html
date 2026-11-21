@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self';" />
+  <title>Set up MeetScribe</title>
+  <style>
+    :root {
+      --bg: #141417;
+      --pane: #1c1c20;
+      --border: rgba(255,255,255,0.10);
+      --text: #ececef;
+      --muted: #8f8f99;
+      --accent: #6fb4ff;
+      --ok: #6ee7a8;
+      --bad: #ff8a80;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+      display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
+
+    .steps { display: flex; gap: 6px; padding: 18px 28px 0; }
+    .steps span { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.10); }
+    .steps span.on { background: var(--accent); }
+
+    main { flex: 1; overflow-y: auto; padding: 22px 28px; }
+    section { display: none; }
+    section.active { display: block; }
+    h1 { font-size: 22px; font-weight: 650; margin-bottom: 8px; }
+    p { color: var(--muted); margin-bottom: 12px; }
+    p strong { color: var(--text); font-weight: 600; }
+
+    footer { display: flex; gap: 10px; justify-content: flex-end; align-items: center; padding: 14px 28px;
+      border-top: 1px solid var(--border); }
+    footer .spacer { flex: 1; }
+    button { font: inherit; font-size: 13px; border-radius: 8px; padding: 8px 16px; cursor: pointer;
+      border: 1px solid var(--border); background: rgba(255,255,255,0.06); color: var(--text); }
+    button:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #08131f; font-weight: 600; }
+    button.primary:hover:not(:disabled) { background: #8cc4ff; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    button.link { background: none; border: none; color: var(--accent); padding: 0; }
+    a { color: var(--accent); }
+
+    .facts { list-style: none; margin: 16px 0; display: grid; gap: 10px; }
+    .facts li { display: flex; gap: 12px; align-items: flex-start; background: var(--pane);
+      border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .facts .icon { font-size: 18px; line-height: 1.2; }
+    .facts b { display: block; font-weight: 600; }
+    .facts small { color: var(--muted); font-size: 12.5px; }
+
+    .check { display: flex; gap: 12px; align-items: flex-start; background: var(--pane);
+      border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+    .check .mark { width: 22px; height: 22px; flex: none; border-radius: 50%; display: grid; place-items: center;
+      font-size: 12px; font-weight: 700; background: rgba(255,255,255,0.08); color: var(--muted); }
+    .check.ok .mark { background: rgba(110,231,168,0.18); color: var(--ok); }
+    .check.bad .mark { background: rgba(255,138,128,0.18); color: var(--bad); }
+    .check.busy .mark::after { content: ''; width: 10px; height: 10px; border-radius: 50%;
+      border: 2px solid var(--accent); border-top-color: transparent; animation: spin 0.8s linear infinite; }
+    .check.busy .mark { font-size: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .check .body { flex: 1; min-width: 0; }
+    .check b { font-weight: 600; display: block; }
+    .check small { color: var(--muted); font-size: 12.5px; display: block; overflow-wrap: anywhere; }
+    .check .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .check .side { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+    .choices { display: grid; gap: 10px; margin: 14px 0; }
+    .choice { display: flex; gap: 12px; align-items: center; text-align: left; width: 100%;
+      background: var(--pane); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .choice.selected { border-color: var(--accent); background: rgba(111,180,255,0.10); }
+    .choice .flag { width: 30px; height: 20px; border-radius: 3px; overflow: hidden; flex: none;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.18); font-size: 18px; line-height: 20px; text-align: center; }
+    .choice .flag svg { display: block; width: 100%; height: 100%; }
+    .choice b { display: block; font-weight: 600; }
+    .choice small { color: var(--muted); font-size: 12.5px; }
+
+    .plan { background: var(--pane); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-top: 6px; }
+    .plan div { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 2px 0; }
+    .plan div span:first-child { color: var(--muted); }
+    .plan .total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; font-weight: 600; }
+    label.option { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; color: var(--muted); font-size: 13px; cursor: pointer; }
+    label.option input { margin-top: 3px; }
+
+    .bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.10); overflow: hidden; margin-top: 8px; position: relative; }
+    .bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s ease; }
+    .bar.indeterminate span { position: absolute; width: 30%; animation: slide 1.4s ease-in-out infinite; }
+    @keyframes slide { 0% { left: -30%; } 100% { left: 100%; } }
+
+    details.log { margin-top: 14px; }
+    details.log summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+    details.log pre { margin-top: 8px; max-height: 200px; overflow: auto; background: #0b0b0d; border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px; color: #9fd0a0; font: 11.5px/1.45 Consolas, "Courier New", monospace;
+      white-space: pre-wrap; word-break: break-all; -webkit-user-select: text; user-select: text; }
+
+    .error { background: rgba(255,90,80,0.10); border: 1px solid rgba(255,90,80,0.35); color: #ffcfcb;
+      border-radius: 10px; padding: 10px 14px; margin-top: 12px; font-size: 13px; overflow-wrap: anywhere; }
+    .error[hidden] { display: none; }
+    .done-art { font-size: 44px; margin-bottom: 6px; }
+    kbd { font: 12px Consolas, monospace; background: rgba(255,255,255,0.10); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 5px; color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="steps" id="steps"><span></span><span></span><span></span><span></span><span></span></div>
+
+  <main>
+    <!-- 1. Welcome -->
+    <section id="step-welcome" class="active">
+      <h1>Welcome to MeetScribe</h1>
+      <p>MeetScribe writes down your meetings while they happen, right on this PC. This assistant sets it up in a few steps.</p>
+      <ul class="facts">
+        <li><span class="icon">🔒</span><span><b>Nothing leaves your computer</b><small>No account, no cloud, no API keys. Audio and text stay on this PC.</small></span></li>
+        <li><span class="icon">⬇️</span><span><b>One-time download of about 1 to 4 GB</b><small>The speech engine and the speech models. Takes about 5 to 20 minutes, depending on your internet.</small></span></li>
+        <li><span class="icon">🎙️</span><span><b>Two transcripts</b><small>A quick one live while you talk, then a more accurate one after the meeting.</small></span></li>
+      </ul>
+    </section>
+
+    <!-- 2. Python -->
+    <section id="step-python">
+      <h1>Checking your PC</h1>
+      <p>MeetScribe's speech engine runs on Python, a free programming tool. Python 3.11, 3.12 or 3.13 is needed.</p>
+      <div class="check busy" id="pythonCheck">
+        <span class="mark">✓</span>
+        <div class="body">
+          <b id="pythonTitle">Looking for Python…</b>
+          <small id="pythonDetail"></small>
+          <div class="actions" id="pythonActions" hidden>
+            <button class="primary" id="installPython">Install Python for me</button>
+            <button id="recheckPython">Check again</button>
+          </div>
+        </div>
+      </div>
+      <div class="error" id="pythonError" hidden></div>
+    </section>
+
+    <!-- 3. Language -->
+    <section id="step-language">
+      <h1>What language are your meetings in?</h1>
+      <p>This picks the best speech models for you. You can change it later in Settings → Profiles.</p>
+      <div class="choices" id="choices"></div>
+      <div class="plan" id="plan"></div>
+      <label class="option"><input type="checkbox" id="gpu" />
+        <span>I have an NVIDIA graphics card. <small>Makes transcription faster, adds about 1 GB to the download. Leave it off if you're not sure.</small></span></label>
+    </section>
+
+    <!-- 4. Install -->
+    <section id="step-install">
+      <h1 id="installTitle">Setting things up</h1>
+      <p id="installHint">You can keep working meanwhile. Don't close this window.</p>
+      <div id="tasks"></div>
+      <div class="error" id="installError" hidden></div>
+      <details class="log"><summary>Show details</summary><pre id="log"></pre></details>
+    </section>
+
+    <!-- 5. Done -->
+    <section id="step-done">
+      <div class="done-art">🎉</div>
+      <h1>You're ready</h1>
+      <p>Start a meeting call as usual, then press <strong>Record</strong> on the MeetScribe bar at the top of your screen, or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>.</p>
+      <ul class="facts">
+        <li><span class="icon">⋮⋮</span><span><b>Move the bar</b><small>Drag the dotted grip on its left edge.</small></span></li>
+        <li><span class="icon">📝</span><span><b>Your transcripts</b><small>Open them with the Library button on the bar. The accurate version appears a few minutes after each meeting.</small></span></li>
+        <li><span class="icon">⚙️</span><span><b>Change anything later</b><small>Settings (<kbd>Ctrl</kbd>+<kbd>,</kbd>) has profiles, models and this assistant again.</small></span></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <button id="back">Back</button>
+    <span class="spacer"></span>
+    <button id="later">Set up later</button>
+    <button class="primary" id="next">Start setup</button>
+  </footer>
+
+  <script src="./src/ui/flags.js"></script>
+  <script src="./src/ui/model-card.js"></script>
+  <script src="./src/core/profile-suggest.js"></script>
+  <script src="./src/ui/setup-window.js"></script>
+</body>
+</html>

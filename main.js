@@ -58,6 +58,7 @@ const audioArchive = require("./src/services/audio-archive.service");
 const offlinePass = require("./src/services/offline-pass.service");
 const modelStore = require("./src/services/model-store.service");
 const profiles = require("./src/core/profiles");
+const settingsSchema = require("./src/core/settings-schema");
 const libraryService = require("./src/services/library.service");
 const managerServer = require("./src/services/manager-server.service");
 const phoneServer = require("./src/services/phone-server.service");
@@ -164,6 +165,13 @@ class ApplicationController {
     try {
       this.setupPermissions();
       this.setupDisplayMediaHandler();
+      // Built-ins this version no longer ships become the user's own profiles
+      // if they were in use, before anything reads the profile list.
+      const migrated = profiles.migrate(settingsStore.all());
+      if (migrated) {
+        settingsStore.update(migrated);
+        logger.info("Moved retired built-in profiles to the user's own", { count: (migrated.myProfiles || []).length });
+      }
       transcriptionService.configure();
       this.ensureLibraryShortcut();
 
@@ -179,6 +187,8 @@ class ApplicationController {
       await this.startOverlay();
       this.starting = false;
       this.isReady = true;
+      // A new install walks through setup instead of failing on the first Record.
+      await this.openSetupIfNeeded();
 
       if (settingsStore.get("autoStartRecording")) {
         setTimeout(() => this.startRecording(), 1200);
@@ -448,8 +458,10 @@ class ApplicationController {
       updateProfile: (id, values, meta) => this.updateProfile(id, values, meta),
       createProfile: (options) => this.createProfile(options),
       deleteProfile: (id) => this.deleteProfile(id),
+      restoreBuiltinProfiles: () => this.restoreBuiltinProfiles(),
       downloadModel: (id, options) => this.downloadModel(id, options),
       deleteModel: (id) => this.deleteModel(id),
+      cancelModel: (id) => modelStore.cancel(id),
       searchModels: (query) => modelStore.searchHub(query),
       openApp: () => this.leaveLibraryOnly(),
       libraryOnly: () => this.enterLibraryOnly(),
@@ -521,6 +533,7 @@ class ApplicationController {
     // looks like the app is idle while it is doing the most useful work it does.
     modelStore.on("progress", (payload) => {
       windowManager.broadcastToAllWindows("model-progress", payload);
+      windowManager.sendToSetup("model-progress", payload);
     });
 
     offlinePass.on("progress", (payload) => {
@@ -574,10 +587,11 @@ class ApplicationController {
     }
 
     if (transcriptionService.isLiveEnabled() && !transcriptionService.isAvailable()) {
-      const message =
-        'Whisper is not set up yet. Open Settings (Ctrl+,) → Transcription → "Install / Repair Whisper".';
+      const message = "MeetScribe is not set up yet. The setup assistant is open; it takes a few minutes.";
       windowManager.broadcastToAllWindows("transcription-error", { message });
       logger.warn(message);
+      // Show the way instead of only describing it.
+      windowManager.showSetup().catch(() => {});
       return null;
     }
 
@@ -970,14 +984,10 @@ class ApplicationController {
 
   saveSettings(patch) {
     const previous = settingsStore.all();
-    let next = settingsStore.update(patch);
-
-    // Edits made under an active profile are remembered by that profile.
-    // Picking a profile passes its own values through here too, which is a no-op.
-    if (!patch.profiles && !patch.myProfiles) {
-      const remembered = profiles.recordEdit(next.activeProfile, patch, next);
-      if (remembered) next = settingsStore.update(remembered);
-    }
+    // Edits under an active profile are not written into it any more: the
+    // profile shows as "modified" (listProfiles().changed) until the user
+    // saves, saves as new, or undoes.
+    const next = settingsStore.update(patch);
 
     if (patch.appIcon && patch.appIcon !== previous.appIcon) {
       this.updateAppIcon(patch.appIcon);
@@ -1001,7 +1011,11 @@ class ApplicationController {
 
   listProfiles() {
     const settings = settingsStore.all();
-    return { active: profiles.activeId(settings), profiles: profiles.listProfiles(settings, settingsStore.defaults()) };
+    const active = profiles.activeId(settings);
+    const list = profiles.listProfiles(settings, settingsStore.defaults());
+    const current = list.find((profile) => profile.id === active) || null;
+    const hidden = Array.isArray(settings.hiddenProfiles) ? settings.hiddenProfiles : [];
+    return { active, profiles: list, changed: profiles.changedKeys(current, settings), hiddenBuiltins: hidden.length };
   }
 
   selectProfile(id) {
@@ -1034,13 +1048,17 @@ class ApplicationController {
     }
   }
 
-  /** A new profile of the user's own; `fromId` copies another profile, otherwise the current settings. */
-  createProfile({ label, flag, fromId, activate }) {
+  /**
+   * A new profile of the user's own; `fromId` copies another profile, otherwise
+   * the current settings. `values` (from the guided questions) go on top.
+   */
+  createProfile({ label, flag, fromId, activate, values }) {
     try {
       const settings = settingsStore.all();
       const source = fromId ? profiles.getProfile(fromId, settings, settingsStore.defaults()) : null;
       if (fromId && !source) throw new Error("Unknown profile: " + fromId);
-      const { id, patch } = profiles.create({ label, flag, values: source ? source.values : settings }, settings);
+      const base = source ? source.values : settings;
+      const { id, patch } = profiles.create({ label, flag, values: { ...base, ...profiles.pick(values || {}) } }, settings);
       settingsStore.update(patch);
       if (activate) return { ...this.selectProfile(id), id };
       managerServer.broadcast("settings", { reason: "profile" });
@@ -1050,12 +1068,26 @@ class ApplicationController {
     }
   }
 
+  /** Profile keys only, with the same checks as a settings change. Throws on a bad value. */
+  _validProfileValues(values) {
+    if (!values || typeof values !== "object") return null;
+    const picked = profiles.pick(values);
+    const { patch, errors } = settingsSchema.validatePatch(picked);
+    if (errors.length) throw new Error(errors.join("; "));
+    return patch;
+  }
+
   deleteProfile(id) {
     try {
       return this._profileChanged(null, profiles.remove(id, settingsStore.all()));
     } catch (error) {
       return { ok: false, error: error.message };
     }
+  }
+
+  /** Bring back built-in profiles the user deleted. */
+  restoreBuiltinProfiles() {
+    return this._profileChanged(null, profiles.restoreBuiltins());
   }
 
   resetProfile(id) {
@@ -1129,6 +1161,31 @@ class ApplicationController {
     ipcMain.handle("profiles:list", () => this.listProfiles());
     ipcMain.handle("profiles:select", (_event, id) => this.selectProfile(id));
     ipcMain.handle("profiles:reset", (_event, id) => this.resetProfile(id));
+    ipcMain.handle("profiles:create", (_event, options = {}) => {
+      try {
+        return this.createProfile({
+          label: String(options.label || ""),
+          flag: String(options.flag || "custom"),
+          fromId: options.fromId ? String(options.fromId) : null,
+          activate: options.activate === true,
+          values: this._validProfileValues(options.values),
+        });
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    });
+    ipcMain.handle("profiles:update", (_event, id, values, meta = {}) => {
+      try {
+        return this.updateProfile(String(id || ""), this._validProfileValues(values) || {}, {
+          ...(meta && meta.label !== undefined && { label: String(meta.label) }),
+          ...(meta && meta.flag !== undefined && { flag: String(meta.flag) }),
+        });
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    });
+    ipcMain.handle("profiles:delete", (_event, id) => this.deleteProfile(String(id || "")));
+    ipcMain.handle("profiles:restore-builtins", () => this.restoreBuiltinProfiles());
 
     // ── Meeting ──
     ipcMain.handle("meeting:start", () => this.startRecording());
@@ -1241,6 +1298,32 @@ class ApplicationController {
     ipcMain.handle("models:list", () => this.listModels());
     ipcMain.handle("models:download", (_event, id) => this.downloadModel(id));
     ipcMain.handle("models:delete", (_event, id) => this.deleteModel(id));
+    ipcMain.handle("models:cancel", (_event, id) => modelStore.cancel(id));
+
+    // ── Setup assistant ──
+    ipcMain.handle("setup:check", () => this.checkSetup());
+    ipcMain.handle("setup:install-python", (event) => {
+      const sender = event.sender;
+      return this.installPython((line) => {
+        try { sender.send("install-progress", line); } catch (_) { /* window gone */ }
+      });
+    });
+    ipcMain.handle("setup:open", async () => {
+      await windowManager.showSetup();
+      return { ok: true };
+    });
+    ipcMain.handle("setup:complete", () => {
+      settingsStore.update({ setupCompleted: true });
+      windowManager.broadcastToAllWindows("load-settings", this.getSettings());
+      return { ok: true };
+    });
+    ipcMain.on("setup:close", () => windowManager.closeSetup());
+    // The overlay's warning: the assistant while Whisper is missing, else Settings.
+    ipcMain.handle("show-help-for-warning", async () => {
+      if (!transcriptionService.getStatus().configured) await windowManager.showSetup();
+      else this.showSettings();
+      return { ok: true };
+    });
 
     ipcMain.handle("whisper:install", async (event, options = {}) => {
       const sender = event.sender;
@@ -1382,6 +1465,8 @@ class ApplicationController {
         app.getPath("userData"),
       ];
       if (options.gpu) args.push("--gpu");
+      // The setup assistant downloads models itself, with progress and cancel.
+      if (options.noModel) args.push("--no-model");
 
       send(`Running setup (this can take several minutes)...`);
 
@@ -1393,6 +1478,8 @@ class ApplicationController {
       });
 
       let pythonPath = null;
+      // The script's own "ERROR ..." line says what to do; the exit code does not.
+      let lastError = null;
       const handle = (chunk) => {
         const text = chunk.toString();
         for (const line of text.split(/\r?\n/)) {
@@ -1400,6 +1487,8 @@ class ApplicationController {
           send(line);
           const match = line.match(/^OK (.+)$/);
           if (match) pythonPath = match[1].trim();
+          const failure = line.match(/^ERROR (.+)$/);
+          if (failure) lastError = failure[1].trim();
         }
       };
 
@@ -1418,10 +1507,84 @@ class ApplicationController {
           send("Whisper is ready.");
           resolve({ ok: true, python: pythonPath });
         } else {
-          resolve({ ok: false, message: `Setup exited with code ${code}` });
+          const message = lastError || `Setup exited with code ${code}`;
+          send(`Setup failed: ${message}`);
+          resolve({ ok: false, message });
         }
       });
     });
+  }
+
+  /** What is installed already, from `setup-whisper.js --check`. */
+  checkSetup() {
+    return new Promise((resolve) => {
+      const { spawn } = require("child_process");
+      const scriptPath = this._unpackedPath(path.join(__dirname, "scripts", "setup-whisper.js"));
+      const child = spawn(process.execPath, [scriptPath, "--check", "--data-dir", app.getPath("userData")], {
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+        windowsHide: true,
+      });
+      let output = "";
+      child.stdout.on("data", (chunk) => { output += chunk.toString(); });
+      child.on("error", (error) => resolve({ ok: false, error: error.message }));
+      child.on("close", () => {
+        const line = output.split(/\r?\n/).find((candidate) => candidate.startsWith("CHECK "));
+        if (!line) return resolve({ ok: false, error: "The setup check gave no answer" });
+        try {
+          const result = JSON.parse(line.slice("CHECK ".length));
+          resolve({ ok: true, ...result, configured: transcriptionService.getStatus().configured });
+        } catch (error) {
+          resolve({ ok: false, error: error.message });
+        }
+      });
+    });
+  }
+
+  /**
+   * Install Python 3.12 for this user with winget (no admin prompt), streaming
+   * its output. setup-whisper.js finds it by its install path afterwards, so
+   * MeetScribe does not need a restart to pick up the new PATH.
+   */
+  installPython(send) {
+    return new Promise((resolve) => {
+      const { spawn } = require("child_process");
+      const args = [
+        "install", "-e", "--id", "Python.Python.3.12", "--scope", "user", "--silent",
+        "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity",
+      ];
+      send("$ winget " + args.join(" "));
+      const child = spawn("winget", args, { windowsHide: true });
+      let lastLine = "";
+      const handle = (chunk) => {
+        // winget redraws a spinner and a bar with \r and block characters.
+        for (const raw of chunk.toString().split(/[\r\n]+/)) {
+          const line = raw.replace(/[\u2580-\u259F|/\\-]{3,}/g, "").replace(/\s+/g, " ").trim();
+          if (line.length < 3 || line === lastLine) continue;
+          lastLine = line;
+          send(line);
+        }
+      };
+      child.stdout.on("data", handle);
+      child.stderr.on("data", handle);
+      child.on("error", (error) => resolve({ ok: false, error: "winget could not start: " + error.message }));
+      child.on("close", (code) => {
+        // 0 = installed; this one = already installed (no newer version).
+        if (code === 0 || code === -1978335189) return resolve({ ok: true });
+        resolve({ ok: false, error: `winget exited with code ${code}` });
+      });
+    });
+  }
+
+  /** On first launch, or from the overlay warning while Whisper is missing. */
+  async openSetupIfNeeded() {
+    if (settingsStore.get("setupCompleted")) return false;
+    if (transcriptionService.getStatus().configured) {
+      // Set up before the assistant existed: nothing to walk through.
+      settingsStore.update({ setupCompleted: true });
+      return false;
+    }
+    await windowManager.showSetup();
+    return true;
   }
 
   _unpackedPath(candidate) {

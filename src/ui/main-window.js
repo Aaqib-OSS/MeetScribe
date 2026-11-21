@@ -39,7 +39,8 @@ class MainWindowUI {
     document.getElementById('libraryBtn').addEventListener('click', () => window.electronAPI.openManager());
     document.getElementById('settingsBtn').addEventListener('click', () => window.electronAPI.showSettings());
     this.status.addEventListener('click', () => window.electronAPI.toggleInteraction());
-    this.warn.addEventListener('click', () => window.electronAPI.showSettings());
+    // While Whisper is missing this opens the setup assistant, else Settings.
+    this.warn.addEventListener('click', () => window.electronAPI.showHelpForWarning());
     this.final.addEventListener('click', () => window.electronAPI.openMeetingFolder());
     this.bindGrip(document.getElementById('grip'));
   }
@@ -117,7 +118,7 @@ class MainWindowUI {
 
     window.electronAPI.onTranscriptionStatus((status) => {
       if (status && status.available === false) {
-        this.setWarning('Whisper not set up — open Settings');
+        this.setWarning('Setup needed — click here');
       } else if (status && status.available) {
         this.setWarning('');
       }
@@ -133,7 +134,7 @@ class MainWindowUI {
       }
       const whisper = await window.electronAPI.getWhisperStatus();
       if (whisper && !whisper.configured) {
-        this.setWarning('Whisper not set up — open Settings');
+        this.setWarning('Setup needed — click here');
       }
     } catch (_) {
       /* main process still starting */

@@ -60,10 +60,39 @@ test('picking a profile keeps the current glossary unless the profile stored one
   assert.equal(profiles.select('german', stored, DEFAULTS).patch.glossary, 'Zorblin');
 });
 
-test('tunisian profile turns live transcription off and uses the final pass', () => {
-  const tunisian = profiles.getProfile('tunisian');
-  assert.equal(tunisian.values.liveTranscription, false);
-  assert.equal(tunisian.values.offlinePassEnabled, true);
+test('only English and German ship as built-ins', () => {
+  assert.deepEqual(profiles.BUILTIN.map((profile) => profile.id), ['english', 'german']);
+  assert.deepEqual(profiles.listProfiles({}, {}).map((profile) => profile.id), [profiles.NONE_ID, 'english', 'german']);
+});
+
+test('a retired built-in that was in use becomes your own profile', () => {
+  const settings = { activeProfile: 'tunisian', profiles: { 'german-work': { folderNamePrefix: 'Standup' } }, myProfiles: [] };
+  const patch = profiles.migrate(settings);
+  const mine = patch.myProfiles;
+  assert.deepEqual(mine.map((profile) => profile.label), ['German · Work', 'Tunisian']);
+  assert.equal(mine[0].values.folderNamePrefix, 'Standup');
+  assert.equal(mine[1].values.liveTranscription, false);
+  assert.equal(mine[1].values.offlineModel, 'medyas/FarukSTT');
+  assert.equal(patch.activeProfile, mine[1].id);
+  assert.deepEqual(patch.profiles, {});
+  // Applied once, there is nothing left to move.
+  assert.equal(profiles.migrate({ ...settings, ...patch }), null);
+  // Never used: nothing to move.
+  assert.equal(profiles.migrate({ activeProfile: 'english' }), null);
+});
+
+test('a built-in can be deleted and restored', () => {
+  const settings = { activeProfile: 'german', profiles: { german: { folderNamePrefix: 'Standup' } }, hiddenProfiles: [] };
+  const patch = profiles.remove('german', settings);
+  assert.deepEqual(patch.hiddenProfiles, ['german']);
+  assert.equal(patch.activeProfile, '');
+  assert.equal('german' in patch.profiles, false);
+  const after = { ...settings, ...patch };
+  assert.deepEqual(profiles.listProfiles(after, {}).map((profile) => profile.id), [profiles.NONE_ID, 'english']);
+  assert.throws(() => profiles.remove('german', after), /Unknown profile/);
+  const restored = { ...after, ...profiles.restoreBuiltins() };
+  assert.ok(profiles.getProfile('german', restored));
+  assert.throws(() => profiles.remove(profiles.NONE_ID, {}), /cannot be deleted/);
 });
 
 test('stored edits overlay the built-in values', () => {
@@ -113,10 +142,9 @@ test('a profile of your own: create from settings, edit, rename, delete', () => 
   assert.equal(removed.activeProfile, '');
 });
 
-test('names must be new and built-ins cannot be deleted', () => {
+test('names must be new', () => {
   assert.throws(() => profiles.create({ label: 'English', values: {} }, {}), /already exists/);
   assert.throws(() => profiles.create({ label: '   ', values: {} }, {}), /name/);
-  assert.throws(() => profiles.remove('english', {}), /cannot be deleted/);
   assert.throws(() => profiles.update(profiles.NONE_ID, {}, {}), /cannot be changed/);
   const second = profiles.create({ label: 'Acme!', values: {} }, { myProfiles: [{ id: 'my-acme', label: 'Acme 1', values: {} }] });
   assert.equal(second.id, 'my-acme-2');
