@@ -253,11 +253,13 @@ class SettingsWindow {
       status.textContent = payload.message || payload.state || '';
     });
 
-    document.getElementById('restartApp').addEventListener('click', () => {
-      window.electronAPI.restartAppForStealth();
+    document.getElementById('restartApp').addEventListener('click', (event) => {
+      this.confirmIfBusy(event.currentTarget, 'Restart', () => window.electronAPI.restartAppForStealth());
     });
 
-    document.getElementById('quitApp').addEventListener('click', () => window.electronAPI.quitApp());
+    document.getElementById('quitApp').addEventListener('click', (event) => {
+      this.confirmIfBusy(event.currentTarget, 'Quit', () => window.electronAPI.quitApp());
+    });
     document.getElementById('closeBtn').addEventListener('click', () => window.electronAPI.closeSettings());
 
     document.querySelectorAll('.icon-choice').forEach((choice) => {
@@ -1258,6 +1260,31 @@ class SettingsWindow {
     const fold = element.closest('details.model-more');
     if (fold) fold.open = true;
     element.replaceWith(this.renderModel(row));
+  }
+
+  /**
+   * Quit and Restart: straight away when nothing is running; otherwise the
+   * button first says what it would interrupt and needs a second click. A
+   * recording is stopped properly first either way (its final pass resumes on
+   * the next launch).
+   */
+  async confirmIfBusy(button, verb, action) {
+    if (button.dataset.armed === '1') {
+      button.dataset.armed = '';
+      return action();
+    }
+    let busy = {};
+    try { busy = await window.electronAPI.getBusyState(); } catch (_) { /* unknown: just do it */ }
+    if (!busy.recording && !busy.finalPass) return action();
+    const what = busy.recording ? 'Stops the recording' : 'The final pass starts over next time';
+    const label = button.textContent;
+    button.dataset.armed = '1';
+    button.textContent = what + ' · click again to ' + verb.toLowerCase();
+    setTimeout(() => {
+      if (button.dataset.armed !== '1') return;
+      button.dataset.armed = '';
+      button.textContent = label;
+    }, 5000);
   }
 
   /** A failed download, in words someone can act on, with a way to dismiss it. */

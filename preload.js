@@ -90,12 +90,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateAppIcon: (iconKey) => ipcRenderer.invoke('update-app-icon', iconKey),
   restartAppForStealth: () => ipcRenderer.invoke('restart-app-for-stealth'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
+  getBusyState: () => ipcRenderer.invoke('app:busy'),
 
   // ── Events (each returns a disposer) ──
   onTranscriptLine: (cb) => on('transcript-line', cb),
   onMeetingStarted: (cb) => on('meeting-started', cb),
   onMeetingStopped: (cb) => on('meeting-stopped', cb),
   onRecordingState: (cb) => on('recording-state', cb),
+  onRecordingStopping: (cb) => on('recording-stopping', cb),
   onTranscriptionStatus: (cb) => on('transcription-status', cb),
   onTranscriptionError: (cb) => on('transcription-error', cb),
   onAudioLevel: (cb) => on('audio-level', cb),
