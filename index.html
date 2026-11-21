@@ -33,6 +33,26 @@
       -webkit-app-region: drag;
     }
 
+    /* A visible place to grab. Dragged from script (main-window.js), not as an
+       app region: Windows ignores the cursor over app regions, and the move
+       cursor is what tells you it can be dragged. */
+    .grip {
+      -webkit-app-region: no-drag;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 22px;
+      margin-right: 2px;
+      border-radius: 4px;
+      color: #6b6b73;
+      cursor: grab;
+      touch-action: none;
+    }
+    .grip:hover { color: #d4d4da; background: rgba(255,255,255,0.08); }
+    .grip.dragging { cursor: grabbing; color: #fff; background: rgba(255,255,255,0.12); }
+    .grip svg { display: block; pointer-events: none; }
+
     .item {
       -webkit-app-region: no-drag;
       display: inline-flex;
@@ -114,6 +134,13 @@
 </head>
 <body>
   <div class="bar" id="bar">
+    <span class="grip" id="grip" title="Drag to move">
+      <svg width="6" height="12" viewBox="0 0 6 12" fill="currentColor" aria-hidden="true">
+        <circle cx="1" cy="1.5" r="1"/><circle cx="5" cy="1.5" r="1"/>
+        <circle cx="1" cy="6" r="1"/><circle cx="5" cy="6" r="1"/>
+        <circle cx="1" cy="10.5" r="1"/><circle cx="5" cy="10.5" r="1"/>
+      </svg>
+    </span>
     <button class="item" id="recordBtn" title="Start / stop recording (Ctrl+Shift+R)">
       <span class="dot" id="dot"></span>
       <span id="recordLabel">Record</span>
