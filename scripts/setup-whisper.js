@@ -79,12 +79,39 @@ function findPython() {
     say(`Using Python ${version} via "${command} ${prefix.join(' ')}".`);
     return { command, prefix };
   }
-  throw new Error('No suitable Python found. Install Python 3.11-3.13 from python.org and re-run.');
+  throw new Error('No suitable Python found. Install Python 3.12 from python.org (tick "Add python.exe to PATH"), then click Install / Repair Whisper again');
+}
+
+/**
+ * Why the existing venv cannot be reused, or null when it is fine. A venv whose
+ * base Python was uninstalled no longer starts, and one made with an
+ * unsupported version can never install ctranslate2; "Repair" has to rebuild
+ * both instead of reusing them. A missing faster-whisper is fixed by the pip
+ * step below and is not a reason to rebuild.
+ */
+function venvProblem() {
+  const probe = spawnSync(venvPython, ['-c', 'import sys; print("%d.%d" % sys.version_info[:2])'], {
+    encoding: 'utf8',
+    windowsHide: true
+  });
+  if (probe.status !== 0 || !probe.stdout) return 'its Python no longer starts';
+  const version = probe.stdout.trim();
+  const [major, minor] = version.split('.').map(Number);
+  if (major !== 3 || minor < 9 || minor > 13) return `it uses Python ${version} (need 3.9-3.13)`;
+  return null;
 }
 
 function main() {
   say('=== MeetScribe Whisper setup ===');
   say(`Data directory: ${dataDir}`);
+
+  if (fs.existsSync(venvPython)) {
+    const problem = venvProblem();
+    if (problem) {
+      say(`The existing environment cannot be used (${problem}); rebuilding it.`);
+      fs.rmSync(venvDir, { recursive: true, force: true });
+    }
+  }
 
   if (!fs.existsSync(venvPython)) {
     const python = findPython();
