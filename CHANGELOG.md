@@ -4,8 +4,12 @@ All notable changes to this project are documented here. Format based on [Keep a
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-21
+
 ### Added
 
+- Settings → Recording shows your version and what the updater is doing (up to date, downloading with a progress bar, an error, or ready), with a "Check for updates" button and "Restart to update". A downloaded update shows as a green "Update to x.y.z" button on the overlay bar. MeetScribe checks again every 4 hours while it runs and never restarts into an update while recording.
+- Setting "Keyboard shortcuts that work in every app" (Settings → Appearance), with the full list and which meeting apps they clash with.
 - A dotted grip on the left of the overlay bar to move it, with a grab cursor.
 - A setup assistant opens on first launch. It checks for Python and can install Python 3.12 with one click (winget, no admin rights). It asks what language your meetings are in, then installs the speech engine and both the live and the after-meeting model, with a checklist, progress bars and Cancel. It also opens from Settings → Transcription, from the overlay's warning, and when you press Record before setup.
 - Model cards say what a model is in plain words ("German · Accurate"), with the technical name underneath as a link to its Hugging Face page, a language badge, speed and accuracy ratings, and the time per 1 h meeting. Settings and the Library describe models the same way.
@@ -19,11 +23,19 @@ All notable changes to this project are documented here. Format based on [Keep a
 - Settings → Recording's "Open Manager" is now "Open Library".
 - Only English and German ship as built-in profiles. German · Work and Tunisian are no longer offered to new users. If you were using or had edited one, it becomes a profile of your own with the same values. The setup assistant's Tunisian choice makes one for you.
 - Built-in profiles can be deleted, like your own; "Restore built-in profiles" brings them back.
+- System-wide keyboard shortcuts are off by default, so they no longer take keys from meeting apps or text editing. To leave click-through without a shortcut, hover the bar's dot and click it. Settings always takes clicks.
+- Quit and Restart ask first while recording, then stop the recording properly before closing.
+- The after-meeting pass downloads a missing model visibly, with progress and Cancel, and waits for a download of the same model already running instead of starting a second one.
+- A model picked for the live or final transcript but not downloaded is listed first, as "Needed, not downloaded yet".
 
 ### Fixed
 
 - A failed model download is shown on its row instead of the row silently going back to "Not downloaded"; without Whisper, Download says "Install Whisper first".
 - Install / Repair Whisper says clearly whether it worked, refreshes the model list, and rebuilds a Python environment that no longer starts or uses an unsupported Python.
+- "Whisper worker closed" when recording on slower PCs: the first line timed out while the live model was still loading. The 45-second limit now starts once the model is loaded.
+- A second Record/Stop press while a recording was stopping could wipe that meeting's audio. Presses during a stop are ignored and the bar shows "Stopping…".
+- A recording cut off by a crash, a forced quit or a restart is recovered on the next launch and gets its final pass.
+- Warnings raised while a recording starts (capture failed, archiving off) stay visible instead of being cleared at once.
 
 ## [1.5.0] - 2026-11-12
 
