@@ -132,6 +132,32 @@
     .profile .flag svg { display: block; width: 100%; height: 100%; }
     .profile .p-name { font-size: 10.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .profile .p-sum { display: none; }
+    .profile.add { flex: 0 0 auto; color: var(--accent); justify-content: center; font-size: 10.5px; font-weight: 600; }
+    .profile.modified .p-name::after { content: ' •'; color: #ffcf70; }
+    .profile-detail { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--field); }
+    .profile-detail .pd-head { display: flex; align-items: center; gap: 8px; }
+    .profile-detail .pd-head b { font-size: 12px; flex: 1; }
+    .profile-detail dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin-top: 6px; font-size: 11px; }
+    .profile-detail dt { color: var(--muted); }
+    .profile-detail dd { color: var(--text); }
+    .profile-detail dd .need { color: #ffcf70; }
+    .notice.warn { color: #ffe3a8; background: rgba(255,200,90,0.08); border-color: rgba(255,200,90,0.30); flex-direction: column; }
+    .notice.info { color: #cfe5ff; background: rgba(111,180,255,0.08); border-color: rgba(111,180,255,0.30); flex-direction: column; }
+    .notice .notice-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .notice .dl-line { display: flex; flex-direction: column; gap: 3px; width: 100%; }
+    .profile-editor h2 { font-size: 13px; font-weight: 600; margin: 8px 0 2px; }
+    .flag-pick { display: flex; flex-wrap: wrap; gap: 5px; }
+    .flag-pick button { -webkit-app-region: no-drag; width: 30px; height: 22px; padding: 2px; border-radius: 4px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--field); }
+    .flag-pick button.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .flag-pick svg { display: block; width: 100%; height: 100%; border-radius: 2px; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .seg button { -webkit-app-region: no-drag; background: var(--field); border: none; color: var(--muted); cursor: pointer;
+      font-family: inherit; font-size: 11px; padding: 4px 14px; }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button.on { background: rgba(111,180,255,0.18); color: var(--text); }
+    .pe-plan { font-size: 11px; color: var(--muted); padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px; line-height: 1.6; }
+    .pe-plan b { color: var(--text); font-weight: 600; }
     .profile-foot { display: flex; justify-content: space-between; gap: 8px; padding: 6px 2px 0; font-size: 10px; color: var(--muted); }
     .profile-foot button { background: none; border: none; color: var(--accent); cursor: pointer;
       font-family: inherit; font-size: 10px; padding: 0; -webkit-app-region: no-drag; }
@@ -202,10 +228,67 @@
     <main>
       <!-- Profiles -->
       <section class="page" id="page-profiles">
-        <div class="profiles" id="profileCards"></div>
-        <div class="profile-foot"><span id="profileHint">Pick a profile to preselect the other tabs.</span>
-          <button id="resetProfile" hidden>Reset this profile</button></div>
-        <div class="hint" style="margin-top:10px;">Make, edit and delete profiles in MeetScribe Library (the Library button).</div>
+        <div id="profileView">
+          <div class="profiles" id="profileCards"></div>
+          <div class="profile-detail" id="profileDetail"></div>
+          <div class="notice warn" id="profileChanged" hidden></div>
+          <div class="notice info" id="profileMissing" hidden></div>
+          <div class="profile-foot"><span id="profileHint">Pick a profile to preselect the other tabs.</span>
+            <span><button id="resetProfile" hidden>Reset to built-in values</button>
+            <button id="restoreProfiles" hidden>Restore built-in profiles</button></span></div>
+        </div>
+
+        <!-- New / edit profile: plain questions; the models follow from the answers. -->
+        <div id="profileEditor" class="profile-editor" hidden>
+          <h2 id="peTitle">New profile</h2>
+          <div class="field">
+            <label for="peName">Name</label>
+            <input type="text" id="peName" maxlength="40" placeholder="e.g. Weekly team call" />
+          </div>
+          <div class="field">
+            <label>Flag</label>
+            <div class="flag-pick" id="peFlags"></div>
+          </div>
+          <div class="field">
+            <label for="peLanguage">What language are these meetings in?</label>
+            <select id="peLanguage"></select>
+          </div>
+          <div class="field">
+            <label>Show the transcript live while recording?</label>
+            <div class="seg" data-name="live"><button data-value="yes">Yes</button><button data-value="no">No</button></div>
+          </div>
+          <div class="field">
+            <label>Make a more accurate transcript after the meeting?</label>
+            <div class="seg" data-name="final"><button data-value="yes">Yes</button><button data-value="no">No</button></div>
+          </div>
+          <div class="field">
+            <label for="pePreference">What matters more?</label>
+            <select id="pePreference"></select>
+          </div>
+          <div class="pe-plan" id="pePlan"></div>
+          <details class="section" id="peAdvanced">
+            <summary>Advanced: pick the models yourself</summary>
+            <div class="field">
+              <label for="peLiveModel">Live model</label>
+              <select id="peLiveModel"></select>
+            </div>
+            <div class="field">
+              <label for="peFinalModel">After-meeting model</label>
+              <select id="peFinalModel"></select>
+            </div>
+            <div class="field">
+              <label for="peFolder">Meeting folder name</label>
+              <input type="text" id="peFolder" maxlength="40" placeholder="e.g. Standup (empty = just the date)" />
+            </div>
+          </details>
+          <div class="notice error" id="peError" hidden></div>
+          <div class="row" style="justify-content:flex-end; margin-top:12px;">
+            <button class="action danger" id="peDelete" hidden>Delete profile</button>
+            <span style="flex:1"></span>
+            <button class="action" id="peCancel">Cancel</button>
+            <button class="action primary" id="peSave">Save and use</button>
+          </div>
+        </div>
       </section>
 
       <!-- Recording -->
@@ -216,7 +299,7 @@
             <input type="text" id="transcriptRoot" readonly />
             <button class="action" id="browseFolder">Browse</button>
             <button class="action" id="openFolder">Open</button>
-            <button class="action" id="openManager" title="Browse, search and play your meetings in the browser">Open Manager</button>
+            <button class="action" id="openManager" title="Browse, search and play your meetings in the browser">Open Library</button>
           </div>
           <div class="hint">Each meeting gets its own folder containing transcript.txt and any screenshots.</div>
         </div>
@@ -621,6 +704,7 @@
 
   <script src="./src/ui/flags.js"></script>
   <script src="./src/ui/model-card.js"></script>
+  <script src="./src/core/profile-suggest.js"></script>
   <script src="./src/core/glossary-budget.js"></script>
   <script src="./src/ui/settings-window.js"></script>
 </body>

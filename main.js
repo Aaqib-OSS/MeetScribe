@@ -58,6 +58,7 @@ const audioArchive = require("./src/services/audio-archive.service");
 const offlinePass = require("./src/services/offline-pass.service");
 const modelStore = require("./src/services/model-store.service");
 const profiles = require("./src/core/profiles");
+const settingsSchema = require("./src/core/settings-schema");
 const libraryService = require("./src/services/library.service");
 const managerServer = require("./src/services/manager-server.service");
 const phoneServer = require("./src/services/phone-server.service");
@@ -164,6 +165,13 @@ class ApplicationController {
     try {
       this.setupPermissions();
       this.setupDisplayMediaHandler();
+      // Built-ins this version no longer ships become the user's own profiles
+      // if they were in use, before anything reads the profile list.
+      const migrated = profiles.migrate(settingsStore.all());
+      if (migrated) {
+        settingsStore.update(migrated);
+        logger.info("Moved retired built-in profiles to the user's own", { count: (migrated.myProfiles || []).length });
+      }
       transcriptionService.configure();
       this.ensureLibraryShortcut();
 
@@ -450,6 +458,7 @@ class ApplicationController {
       updateProfile: (id, values, meta) => this.updateProfile(id, values, meta),
       createProfile: (options) => this.createProfile(options),
       deleteProfile: (id) => this.deleteProfile(id),
+      restoreBuiltinProfiles: () => this.restoreBuiltinProfiles(),
       downloadModel: (id, options) => this.downloadModel(id, options),
       deleteModel: (id) => this.deleteModel(id),
       cancelModel: (id) => modelStore.cancel(id),
@@ -975,14 +984,10 @@ class ApplicationController {
 
   saveSettings(patch) {
     const previous = settingsStore.all();
-    let next = settingsStore.update(patch);
-
-    // Edits made under an active profile are remembered by that profile.
-    // Picking a profile passes its own values through here too, which is a no-op.
-    if (!patch.profiles && !patch.myProfiles) {
-      const remembered = profiles.recordEdit(next.activeProfile, patch, next);
-      if (remembered) next = settingsStore.update(remembered);
-    }
+    // Edits under an active profile are not written into it any more: the
+    // profile shows as "modified" (listProfiles().changed) until the user
+    // saves, saves as new, or undoes.
+    const next = settingsStore.update(patch);
 
     if (patch.appIcon && patch.appIcon !== previous.appIcon) {
       this.updateAppIcon(patch.appIcon);
@@ -1006,7 +1011,11 @@ class ApplicationController {
 
   listProfiles() {
     const settings = settingsStore.all();
-    return { active: profiles.activeId(settings), profiles: profiles.listProfiles(settings, settingsStore.defaults()) };
+    const active = profiles.activeId(settings);
+    const list = profiles.listProfiles(settings, settingsStore.defaults());
+    const current = list.find((profile) => profile.id === active) || null;
+    const hidden = Array.isArray(settings.hiddenProfiles) ? settings.hiddenProfiles : [];
+    return { active, profiles: list, changed: profiles.changedKeys(current, settings), hiddenBuiltins: hidden.length };
   }
 
   selectProfile(id) {
@@ -1039,13 +1048,17 @@ class ApplicationController {
     }
   }
 
-  /** A new profile of the user's own; `fromId` copies another profile, otherwise the current settings. */
-  createProfile({ label, flag, fromId, activate }) {
+  /**
+   * A new profile of the user's own; `fromId` copies another profile, otherwise
+   * the current settings. `values` (from the guided questions) go on top.
+   */
+  createProfile({ label, flag, fromId, activate, values }) {
     try {
       const settings = settingsStore.all();
       const source = fromId ? profiles.getProfile(fromId, settings, settingsStore.defaults()) : null;
       if (fromId && !source) throw new Error("Unknown profile: " + fromId);
-      const { id, patch } = profiles.create({ label, flag, values: source ? source.values : settings }, settings);
+      const base = source ? source.values : settings;
+      const { id, patch } = profiles.create({ label, flag, values: { ...base, ...profiles.pick(values || {}) } }, settings);
       settingsStore.update(patch);
       if (activate) return { ...this.selectProfile(id), id };
       managerServer.broadcast("settings", { reason: "profile" });
@@ -1055,12 +1068,26 @@ class ApplicationController {
     }
   }
 
+  /** Profile keys only, with the same checks as a settings change. Throws on a bad value. */
+  _validProfileValues(values) {
+    if (!values || typeof values !== "object") return null;
+    const picked = profiles.pick(values);
+    const { patch, errors } = settingsSchema.validatePatch(picked);
+    if (errors.length) throw new Error(errors.join("; "));
+    return patch;
+  }
+
   deleteProfile(id) {
     try {
       return this._profileChanged(null, profiles.remove(id, settingsStore.all()));
     } catch (error) {
       return { ok: false, error: error.message };
     }
+  }
+
+  /** Bring back built-in profiles the user deleted. */
+  restoreBuiltinProfiles() {
+    return this._profileChanged(null, profiles.restoreBuiltins());
   }
 
   resetProfile(id) {
@@ -1134,6 +1161,31 @@ class ApplicationController {
     ipcMain.handle("profiles:list", () => this.listProfiles());
     ipcMain.handle("profiles:select", (_event, id) => this.selectProfile(id));
     ipcMain.handle("profiles:reset", (_event, id) => this.resetProfile(id));
+    ipcMain.handle("profiles:create", (_event, options = {}) => {
+      try {
+        return this.createProfile({
+          label: String(options.label || ""),
+          flag: String(options.flag || "custom"),
+          fromId: options.fromId ? String(options.fromId) : null,
+          activate: options.activate === true,
+          values: this._validProfileValues(options.values),
+        });
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    });
+    ipcMain.handle("profiles:update", (_event, id, values, meta = {}) => {
+      try {
+        return this.updateProfile(String(id || ""), this._validProfileValues(values) || {}, {
+          ...(meta && meta.label !== undefined && { label: String(meta.label) }),
+          ...(meta && meta.flag !== undefined && { flag: String(meta.flag) }),
+        });
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    });
+    ipcMain.handle("profiles:delete", (_event, id) => this.deleteProfile(String(id || "")));
+    ipcMain.handle("profiles:restore-builtins", () => this.restoreBuiltinProfiles());
 
     // ── Meeting ──
     ipcMain.handle("meeting:start", () => this.startRecording());

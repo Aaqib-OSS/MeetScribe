@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Format based on [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- A setup assistant opens on first launch. It checks for Python and can install Python 3.12 with one click (winget, no admin rights). It asks what language your meetings are in, then installs the speech engine and both the live and the after-meeting model, with a checklist, progress bars and Cancel. It also opens from Settings → Transcription, from the overlay's warning, and when you press Record before setup.
+- Model cards say what a model is in plain words ("German · Accurate"), with the technical name underneath as a link to its Hugging Face page, a language badge, speed and accuracy ratings, and the time per 1 h meeting. Settings and the Library describe models the same way.
+- Model downloads show a progress bar with "42% · 342 MB of 815 MB" and can be cancelled. A cancelled download leaves nothing behind.
+- New profiles are made by answering a few questions (language, live transcript, transcript after the meeting, speed or quality); MeetScribe picks the models. Profiles can now be created, edited and deleted in Settings too.
+- Picking a profile whose models are not downloaded offers to download them, with progress and Cancel.
+
+### Changed
+
+- Edits are no longer saved into the active profile silently. The profile shows what you changed, with Save to profile, Save as new profile and Undo changes.
+- Settings → Recording's "Open Manager" is now "Open Library".
+- Only English and German ship as built-in profiles. German · Work and Tunisian are no longer offered to new users. If you were using or had edited one, it becomes a profile of your own with the same values. The setup assistant's Tunisian choice makes one for you.
+- Built-in profiles can be deleted, like your own; "Restore built-in profiles" brings them back.
+
+### Fixed
+
+- A failed model download is shown on its row instead of the row silently going back to "Not downloaded"; without Whisper, Download says "Install Whisper first".
+- Install / Repair Whisper says clearly whether it worked, refreshes the model list, and rebuilds a Python environment that no longer starts or uses an unsupported Python.
+
 ## [1.5.0] - 2026-11-12
 
 ### Added

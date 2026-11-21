@@ -79,6 +79,8 @@ class SettingsStore {
       profiles: {},
       // The user's own profiles: [{ id, label, flag, values }].
       myProfiles: [],
+      // Built-in profiles the user deleted (Restore brings them back).
+      hiddenProfiles: [],
       showTranscriptOnRecord: true,
       folderNamePrefix: '',
       windowGap: config.get('ui.windowGap'),
