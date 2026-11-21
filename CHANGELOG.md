@@ -16,6 +16,8 @@ All notable changes to this project are documented here. Format based on [Keep a
 
 - Edits are no longer saved into the active profile silently. The profile shows what you changed, with Save to profile, Save as new profile and Undo changes.
 - Settings → Recording's "Open Manager" is now "Open Library".
+- Only English and German ship as built-in profiles. German · Work and Tunisian are no longer offered to new users. If you were using or had edited one, it becomes a profile of your own with the same values. The setup assistant's Tunisian choice makes one for you.
+- Built-in profiles can be deleted, like your own; "Restore built-in profiles" brings them back.
 
 ### Fixed
 

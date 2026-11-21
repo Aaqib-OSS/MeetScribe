@@ -353,8 +353,9 @@ class SettingsWindow {
     } catch (_) { /* main process not ready; the next open retries */ }
   }
 
-  renderProfiles({ active, profiles, changed }) {
+  renderProfiles({ active, profiles, changed, hiddenBuiltins }) {
     this.activeProfile = active;
+    document.getElementById('restoreProfiles').hidden = !hiddenBuiltins;
     this.profileList = profiles || [];
     this.profileChanged = changed || [];
     const holder = document.getElementById('profileCards');
@@ -628,7 +629,8 @@ class SettingsWindow {
     name.value = profile ? profile.label : '';
     name.disabled = Boolean(profile && !mine);
     name.title = name.disabled ? 'Built-in profiles keep their name' : '';
-    document.getElementById('peDelete').hidden = !mine;
+    // Built-ins can be deleted too; "Restore built-in profiles" brings them back.
+    document.getElementById('peDelete').hidden = !profile || profile.kind === 'none';
     document.getElementById('peError').hidden = true;
 
     const values = profile ? profile.values : this.settings || {};
@@ -816,6 +818,11 @@ class SettingsWindow {
   }
 
   bindProfileEditor() {
+    document.getElementById('restoreProfiles').addEventListener('click', async () => {
+      const result = await window.electronAPI.restoreBuiltinProfiles();
+      if (result && result.settings) this.apply(result.settings);
+      this.loadProfiles();
+    });
     document.getElementById('peCancel').addEventListener('click', () => this.closeProfileEditor());
     document.getElementById('peSave').addEventListener('click', () => this.saveProfileEditor());
     document.getElementById('peDelete').addEventListener('click', () => this.deleteEditedProfile());

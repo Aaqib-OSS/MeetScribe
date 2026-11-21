@@ -61,7 +61,7 @@ MeetScribe is an Electron app (main process + several renderer windows) that she
 
 - `src/core/config.js`: shipped defaults (not user-facing).
 - `src/core/settings.store.js`: user settings as JSON in `userData`, atomic writes, seeded from config defaults.
-- `src/core/profiles.js`: built-in profiles (named sets of settings) and the pure logic for picking one, remembering edits per profile and naming meeting folders. A profile changes the glossary only if one was stored for it.
+- `src/core/profiles.js`: profiles (named sets of settings: the English and German built-ins and the user's own) and the pure logic for picking one, showing what changed against it, deleting and restoring built-ins, moving retired built-ins into the user's own, and naming meeting folders. `src/core/profile-suggest.js` turns the "New profile" answers into models. A profile changes the glossary only if one was stored for it.
 - Whisper venv and models: `%APPDATA%\MeetScribe\.venv-whisper` and `.whisper-models` (created by `scripts/setup-whisper.js`).
 - Transcripts: `~/Documents/MeetingTranscripts/<meeting>/`.
 - Logs: winston via `src/core/logger.js`.

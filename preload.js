@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createProfile: (options) => ipcRenderer.invoke('profiles:create', options),
   updateProfile: (id, values, meta) => ipcRenderer.invoke('profiles:update', id, values, meta),
   deleteProfile: (id) => ipcRenderer.invoke('profiles:delete', id),
+  restoreBuiltinProfiles: () => ipcRenderer.invoke('profiles:restore-builtins'),
   pickFolder: () => ipcRenderer.invoke('settings:pick-folder'),
   pickPython: () => ipcRenderer.invoke('settings:pick-python'),
   showSettings: () => ipcRenderer.invoke('show-settings'),

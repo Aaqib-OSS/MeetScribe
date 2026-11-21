@@ -1954,6 +1954,9 @@
     state.profiles = body;
     const cards = $('profileCards');
     cards.replaceChildren();
+    // Deleted built-ins can come back.
+    const restore = $('restoreProfilesBtn');
+    if (restore) restore.hidden = !body.hiddenBuiltins;
     for (const profile of body.profiles) {
       const values = profile.values || {};
       const active = profile.id === body.active;
@@ -1967,7 +1970,7 @@
       if (!none) buttons.push(iconButton('pencil', 'Edit', () => editProfile(profile, active)));
       buttons.push(iconButton('duplicate', 'Duplicate as a new profile', () => newProfile(profile)));
       if (profile.kind === 'builtin' && profile.edited) buttons.push(iconButton('refresh', 'Reset to the built-in values', () => resetProfile(profile)));
-      if (profile.kind === 'mine') buttons.push(el('span', { class: 'spacer' }), iconButton('trash', 'Delete this profile', () => deleteProfile(profile), 'danger'));
+      if (!none) buttons.push(el('span', { class: 'spacer' }), iconButton('trash', 'Delete this profile', () => deleteProfile(profile), 'danger'));
       cards.append(el('div', { class: 'card' + (active ? ' active' : '') + (none ? ' none' : '') }, [
         el('div', { class: 'title' }, [
           flagNode(profile.flag),
@@ -2013,7 +2016,12 @@
   }
 
   async function deleteProfile(profile) {
-    const values = await ask({ title: `Delete “${profile.label}”?`, text: 'Your current settings stay as they are.', ok: 'Delete', danger: true });
+    const values = await ask({
+      title: `Delete “${profile.label}”?`,
+      text: 'Your current settings stay as they are.' + (profile.kind === 'builtin' ? ' Built-in profiles can be brought back with “Restore built-in profiles”.' : ''),
+      ok: 'Delete',
+      danger: true
+    });
     if (!values) return;
     const result = await attempt(() => post('/api/profiles/delete', { id: profile.id }), 'Could not delete the profile');
     if (result) loadProfiles();
@@ -2647,6 +2655,13 @@
     $('glossarySaveBtn').addEventListener('click', saveProjectGlossary);
     $('glossaryDeleteBtn').addEventListener('click', deleteProjectGlossary);
     $('newProfileBtn').addEventListener('click', () => newProfile(null));
+    $('restoreProfilesBtn').addEventListener('click', async () => {
+      const result = await attempt(() => post('/api/profiles/restore-builtins', {}), 'Could not restore the profiles');
+      if (result) {
+        toast('Built-in profiles restored');
+        loadProfiles();
+      }
+    });
     $('hubForm').addEventListener('submit', searchHub);
     bindFileDrop();
     $('infoForm').addEventListener('submit', saveNotes);

@@ -388,6 +388,7 @@ class ManagerServer extends EventEmitter {
         }), (result) => ({ id: result.id }));
       },
       'profiles/delete': (body) => this._unwrap(need('deleteProfile')(String(body.id || '')), () => ({})),
+      'profiles/restore-builtins': () => this._unwrap(need('restoreBuiltinProfiles')(), () => ({})),
       'phone/start': (body) => need('phoneStart')(body.address ? String(body.address) : null),
       'phone/stop': () => {
         need('phoneStop')();

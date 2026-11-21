@@ -165,6 +165,13 @@ class ApplicationController {
     try {
       this.setupPermissions();
       this.setupDisplayMediaHandler();
+      // Built-ins this version no longer ships become the user's own profiles
+      // if they were in use, before anything reads the profile list.
+      const migrated = profiles.migrate(settingsStore.all());
+      if (migrated) {
+        settingsStore.update(migrated);
+        logger.info("Moved retired built-in profiles to the user's own", { count: (migrated.myProfiles || []).length });
+      }
       transcriptionService.configure();
       this.ensureLibraryShortcut();
 
@@ -451,6 +458,7 @@ class ApplicationController {
       updateProfile: (id, values, meta) => this.updateProfile(id, values, meta),
       createProfile: (options) => this.createProfile(options),
       deleteProfile: (id) => this.deleteProfile(id),
+      restoreBuiltinProfiles: () => this.restoreBuiltinProfiles(),
       downloadModel: (id, options) => this.downloadModel(id, options),
       deleteModel: (id) => this.deleteModel(id),
       cancelModel: (id) => modelStore.cancel(id),
@@ -1006,7 +1014,8 @@ class ApplicationController {
     const active = profiles.activeId(settings);
     const list = profiles.listProfiles(settings, settingsStore.defaults());
     const current = list.find((profile) => profile.id === active) || null;
-    return { active, profiles: list, changed: profiles.changedKeys(current, settings) };
+    const hidden = Array.isArray(settings.hiddenProfiles) ? settings.hiddenProfiles : [];
+    return { active, profiles: list, changed: profiles.changedKeys(current, settings), hiddenBuiltins: hidden.length };
   }
 
   selectProfile(id) {
@@ -1074,6 +1083,11 @@ class ApplicationController {
     } catch (error) {
       return { ok: false, error: error.message };
     }
+  }
+
+  /** Bring back built-in profiles the user deleted. */
+  restoreBuiltinProfiles() {
+    return this._profileChanged(null, profiles.restoreBuiltins());
   }
 
   resetProfile(id) {
@@ -1171,6 +1185,7 @@ class ApplicationController {
       }
     });
     ipcMain.handle("profiles:delete", (_event, id) => this.deleteProfile(String(id || "")));
+    ipcMain.handle("profiles:restore-builtins", () => this.restoreBuiltinProfiles());
 
     // ── Meeting ──
     ipcMain.handle("meeting:start", () => this.startRecording());

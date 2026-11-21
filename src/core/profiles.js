@@ -5,11 +5,12 @@
  *   - "No profile" (id NONE_ID): the shipped defaults. Picking it resets the
  *     profile keys to those defaults, and edits made while it is active are not
  *     remembered anywhere but the settings themselves.
- *   - Built-ins (BUILTIN): whatever the user changes while one is active is
- *     written back into it (settings.profiles[id]), so each remembers its own
- *     values; "Reset" drops those edits.
- *   - The user's own (settings.myProfiles): made from the current settings or
- *     as a copy of another profile, renamed, edited and deleted freely.
+ *   - Built-ins (BUILTIN, English and German): edits the user saves into one
+ *     are kept in settings.profiles[id]; "Reset" drops them. A built-in can be
+ *     deleted too (settings.hiddenProfiles) and brought back with "Restore".
+ *   - The user's own (settings.myProfiles): made from answers to a few
+ *     questions, the current settings or a copy of another profile, renamed,
+ *     edited and deleted freely.
  *
  * Built-ins hold no glossary text: a glossary is the user's own content and
  * only ever lives in their settings. So picking one leaves the current
@@ -72,7 +73,15 @@ const BUILTIN = [
       offlineModel: 'cstr/whisper-large-v3-turbo-german-int8_float32',
       folderNamePrefix: 'German'
     }
-  },
+  }
+];
+
+/**
+ * Built-ins that earlier versions shipped. They are no longer offered to new
+ * users; migrate() turns one a user was actually using (active, or edited)
+ * into a profile of their own, so nothing they relied on disappears.
+ */
+const RETIRED = [
   {
     id: 'german-work',
     label: 'German · Work',
@@ -148,7 +157,8 @@ function listProfiles(settings = {}, defaults = {}) {
     kind: 'none',
     edited: false
   };
-  const builtins = BUILTIN.map((profile) => ({
+  const hidden = new Set(Array.isArray(settings && settings.hiddenProfiles) ? settings.hiddenProfiles : []);
+  const builtins = BUILTIN.filter((profile) => !hidden.has(profile.id)).map((profile) => ({
     ...profile,
     values: { ...profile.values, ...pick(stored[profile.id]) },
     kind: 'builtin',
@@ -269,9 +279,23 @@ function create({ label, flag, values }, settings = {}) {
   return { id, patch: { myProfiles: list.concat({ id, label: clean, flag: cleanFlag(flag), values: pick(values) }) } };
 }
 
-/** Delete one of the user's own profiles; deleting the active one leaves "No profile" active (values unchanged). */
+/**
+ * Delete a profile; deleting the active one leaves "No profile" active (values
+ * unchanged). A built-in is hidden rather than gone, so restoreBuiltins() can
+ * bring it back; its saved edits are dropped with it.
+ */
 function remove(id, settings = {}) {
-  if (!isMine(id)) throw new Error('Built-in profiles cannot be deleted; reset them instead');
+  if (id === NONE_ID) throw new Error('"No profile" cannot be deleted');
+  if (BUILTIN.some((profile) => profile.id === id)) {
+    const hidden = Array.isArray(settings.hiddenProfiles) ? settings.hiddenProfiles : [];
+    if (hidden.includes(id)) throw new Error('Unknown profile: ' + id);
+    const stored = { ...((settings && settings.profiles) || {}) };
+    delete stored[id];
+    const patch = { hiddenProfiles: hidden.concat(id), profiles: stored };
+    if (settings.activeProfile === id) patch.activeProfile = '';
+    return patch;
+  }
+  if (!isMine(id)) throw new Error('Unknown profile: ' + id);
   const list = myList(settings);
   if (!list.some((profile) => profile.id === id)) throw new Error('Unknown profile: ' + id);
   const patch = { myProfiles: list.filter((profile) => profile.id !== id) };
@@ -297,6 +321,42 @@ function changedKeys(profile, settings = {}) {
     if (profile.kind === 'none' && key === 'glossary') return false;
     return !same(profile.values[key], settings[key]);
   });
+}
+
+/** Bring back every deleted built-in, with its shipped values. */
+function restoreBuiltins() {
+  return { hiddenProfiles: [] };
+}
+
+/**
+ * Settings from a version that still had the retired built-ins: one that was
+ * active or edited becomes the user's own profile (same values, same name),
+ * and stays active if it was. Returns null when there is nothing to move.
+ */
+function migrate(settings = {}) {
+  const stored = (settings && settings.profiles) || {};
+  let list = myList(settings);
+  const patch = {};
+  for (const retired of RETIRED) {
+    const used = settings.activeProfile === retired.id || stored[retired.id];
+    if (!used) continue;
+    const taken = new Set(listProfiles({ ...settings, myProfiles: list }).map((profile) => profile.id));
+    const labels = new Set(listProfiles({ ...settings, myProfiles: list }).map((profile) => profile.label.toLowerCase()));
+    let label = retired.label;
+    for (let n = 2; labels.has(label.toLowerCase()); n++) label = `${retired.label} ${n}`;
+    const id = newId(label, taken);
+    list = list.concat({ id, label, flag: retired.flag, values: { ...pick(retired.values), ...pick(stored[retired.id]) } });
+    patch.myProfiles = list;
+    if (settings.activeProfile === retired.id) patch.activeProfile = id;
+  }
+  const leftovers = RETIRED.filter((retired) => stored[retired.id]);
+  if (leftovers.length) {
+    const next = { ...stored };
+    for (const retired of leftovers) delete next[retired.id];
+    patch.profiles = next;
+  }
+  if (!patch.activeProfile && RETIRED.some((retired) => settings.activeProfile === retired.id)) patch.activeProfile = '';
+  return Object.keys(patch).length ? patch : null;
 }
 
 /** A built-in back to its shipped values. */
@@ -337,6 +397,9 @@ module.exports = {
   update,
   create,
   remove,
+  restoreBuiltins,
+  migrate,
+  RETIRED,
   reset,
   sanitizeFolderPrefix,
   meetingFolderName

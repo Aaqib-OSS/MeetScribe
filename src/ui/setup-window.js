@@ -11,11 +11,16 @@
 
 const STEPS = ['welcome', 'python', 'language', 'install', 'done'];
 
-// Meeting languages offered, each backed by a built-in profile (src/core/profiles.js).
+// Meeting languages offered. English and German use the built-in profile of
+// that name; any other choice (or a built-in the user deleted) becomes a
+// profile of the user's own, made from the same answers as "+ New" in Settings.
 const LANGUAGES = [
-  { profile: 'english', flag: 'us', title: 'English', text: 'Live transcript, plus a more accurate one after the meeting.' },
-  { profile: 'german', flag: 'de', title: 'German', text: 'Models trained for German. Live transcript plus an accurate one after.' },
-  { profile: 'tunisian', flag: 'tn', title: 'Tunisian Arabic (Derja)', text: 'No live transcript; one accurate transcript after the meeting. Large download.' },
+  { profile: 'english', flag: 'us', title: 'English', text: 'Live transcript, plus a more accurate one after the meeting.',
+    answers: { language: 'en', live: true, final: true } },
+  { profile: 'german', flag: 'de', title: 'German', text: 'Models trained for German. Live transcript plus an accurate one after.',
+    answers: { language: 'de', live: true, final: true } },
+  { label: 'Tunisian', flag: 'tn', title: 'Tunisian Arabic (Derja)', text: 'No live transcript; one accurate transcript after the meeting. Large download.',
+    answers: { language: 'tn', live: false, final: true } },
   { profile: 'none', flag: null, title: 'Another language, or several', text: 'Detects the language by itself. Works for most languages.' }
 ];
 
@@ -219,10 +224,26 @@ class SetupAssistant {
     this.renderPlan();
   }
 
+  /** The profile a choice uses if it exists already: the built-in, or one of the user's with that name. */
+  existingProfile(choice) {
+    if (choice.profile) {
+      const builtin = this.profiles.find((candidate) => candidate.id === choice.profile);
+      if (builtin) return builtin;
+    }
+    const label = (choice.label || choice.title).toLowerCase();
+    return this.profiles.find((candidate) => candidate.kind === 'mine' && candidate.label.toLowerCase() === label) || null;
+  }
+
+  /** The profile values a choice stands for. */
+  valuesFor(choice) {
+    const profile = this.existingProfile(choice);
+    if (profile) return profile.values || {};
+    return window.MeetScribeProfileSuggest.suggest({ preference: 'balanced', ...choice.answers });
+  }
+
   /** The models a choice needs: [{ role, row }], skipping roles that are switched off. */
   modelsFor(choice) {
-    const profile = this.profiles.find((candidate) => candidate.id === choice.profile);
-    const values = (profile && profile.values) || {};
+    const values = this.valuesFor(choice);
     const find = (id) => this.models.find((row) => row.id === id || row.repo === id) ||
       { id, repo: id, title: id, sizeMb: 0, downloaded: false };
     const out = [];
@@ -339,8 +360,15 @@ class SetupAssistant {
 
     try {
       // The profile first: it sets the models and language the rest relies on.
-      const selected = await window.electronAPI.selectProfile(this.choice.profile);
-      if (selected && selected.ok === false) throw new Error(selected.error || 'Could not apply the language choice');
+      const existing = this.existingProfile(this.choice);
+      const selected = existing
+        ? await window.electronAPI.selectProfile(existing.id)
+        : await window.electronAPI.createProfile({
+          label: this.choice.label || this.choice.title, flag: this.choice.flag || 'custom', values: this.valuesFor(this.choice), activate: true
+        });
+      if (!selected || selected.ok === false) throw new Error((selected && selected.error) || 'Could not apply the language choice');
+      // A profile made just now must be found (not made again) by "Try again".
+      this.profiles = ((await window.electronAPI.listProfiles()) || {}).profiles || this.profiles;
 
       const engine = await window.electronAPI.installWhisper({ gpu, noModel: true });
       if (!engine.ok) throw new Error(engine.message || engine.error || 'The speech engine could not be installed');
