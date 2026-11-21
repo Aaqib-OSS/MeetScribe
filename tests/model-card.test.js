@@ -42,3 +42,7 @@ test('finished and partial downloads say so', () => {
   assert.equal(status({ bytes: 3e6 }), 'Incomplete · 3 MB');
   assert.equal(formatBytes(0), '');
 });
+
+test('a model picked for use but not on this PC says it is needed', () => {
+  assert.equal(status({ inUse: ['final'], sizeMb: 815, bytes: 0 }), 'Needed, not downloaded yet · 815 MB');
+});

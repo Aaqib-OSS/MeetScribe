@@ -16,6 +16,17 @@ class WhisperWorkerService {
     this.idleUnloadMs = 60000;
     this.readyInfo = null;
     this.closing = false;
+    // Whether the model is in memory. Until it is, a request includes loading
+    // it (and on first use downloading it), which can take minutes on a slow
+    // PC; the short "wedged worker" timeout only applies once it is loaded.
+    this.loaded = false;
+    this.requestTimeoutMs = 45000;
+    this.loadTimeoutMs = 600000;
+  }
+
+  /** How long a request may take: short once the model is loaded, long while it may still be loading. */
+  _timeoutFor() {
+    return this.loaded ? this.requestTimeoutMs : this.loadTimeoutMs;
   }
 
   configure({ pythonPath, scriptPath, idleUnloadMs = 60000, env }) {
@@ -55,7 +66,8 @@ class WhisperWorkerService {
       cpu_threads: options.cpuThreads || 0,
       beam_size: options.beamSize || 1,
       hotwords: options.hotwords || ''
-    });
+    }, this._timeoutFor());
+    this.loaded = true;
     this._scheduleIdleUnload();
     return result;
   }
@@ -66,14 +78,16 @@ class WhisperWorkerService {
     }
     this._clearIdleTimer();
     // Generous timeout: a warmup may include a first-time model download.
-    return this._request({
+    const result = await this._request({
       action: 'warmup',
       model: options.model || 'small',
       model_dir: options.modelDir || null,
       device: options.device || 'auto',
       compute_type: options.computeType || 'auto',
       cpu_threads: options.cpuThreads || 0
-    }, 600000);
+    }, this.loadTimeoutMs);
+    this.loaded = true;
+    return result;
   }
 
   releaseWhenIdle() {
@@ -132,6 +146,7 @@ class WhisperWorkerService {
       }
       this.process = null;
       this.readyInfo = null;
+      this.loaded = false;
       if (!this.closing) {
         this._rejectAll(error);
       }
@@ -170,9 +185,10 @@ class WhisperWorkerService {
     }
   }
 
-  // 45s, not minutes: a 12s utterance that hasn't come back in 45s means the
-  // worker is wedged, and a fast error beats a three-minute silent stall.
-  _request(payload, timeoutMs = 45000) {
+  // 45s, not minutes, once the model is loaded: a 12s utterance that hasn't
+  // come back in 45s means the worker is wedged, and a fast error beats a
+  // three-minute silent stall. Callers pass _timeoutFor() for that reason.
+  _request(payload, timeoutMs = this.requestTimeoutMs) {
     this._ensureProcess();
     const id = ++this.sequence;
     const request = { ...payload, id };
@@ -206,7 +222,11 @@ class WhisperWorkerService {
         return;
       }
       this._request({ action: 'unload' }, 30000)
-        .then(() => logger.info('Whisper model unloaded after idle timeout'))
+        .then(() => {
+          // The next request loads it again: give it the long timeout.
+          this.loaded = false;
+          logger.info('Whisper model unloaded after idle timeout');
+        })
         .catch((error) => logger.warn('Could not unload idle Whisper model', { error: error.message }));
     }, this.idleUnloadMs);
   }
@@ -238,6 +258,7 @@ class WhisperWorkerService {
     }
     this.process = null;
     this.readyInfo = null;
+    this.loaded = false;
     this._rejectAll(new Error('Whisper worker closed'));
   }
 }
