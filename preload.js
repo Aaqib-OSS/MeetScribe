@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Whisper setup ──
   getWhisperStatus: () => ipcRenderer.invoke('whisper:status'),
   installWhisper: (options) => ipcRenderer.invoke('whisper:install', options),
+  getUpdateStatus: () => ipcRenderer.invoke('update:status'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdateStatus: (cb) => on('update-status', cb),
   checkSetup: () => ipcRenderer.invoke('setup:check'),
   installPython: () => ipcRenderer.invoke('setup:install-python'),
   openSetup: () => ipcRenderer.invoke('setup:open'),

@@ -215,6 +215,18 @@ class SettingsWindow {
     });
 
     document.getElementById('installWhisper').addEventListener('click', () => this.installWhisper());
+
+    document.getElementById('updateCheck').addEventListener('click', async () => {
+      this.renderUpdate(await window.electronAPI.checkForUpdates());
+    });
+    document.getElementById('updateInstall').addEventListener('click', async () => {
+      const result = await window.electronAPI.installUpdate();
+      if (result && result.ok === false) {
+        document.getElementById('updateText').textContent = result.error;
+      }
+    });
+    window.electronAPI.onUpdateStatus((status) => this.renderUpdate(status));
+    window.electronAPI.getUpdateStatus().then((status) => this.renderUpdate(status)).catch(() => {});
     document.getElementById('openSetup').addEventListener('click', () => window.electronAPI.openSetup());
 
     const customModel = document.getElementById('offlineModelCustom');
@@ -1255,6 +1267,32 @@ class SettingsWindow {
     const fold = element.closest('details.model-more');
     if (fold) fold.open = true;
     element.replaceWith(this.renderModel(row));
+  }
+
+  /** Settings → updates: the version, what the updater is doing, and Restart when one is ready. */
+  renderUpdate(status) {
+    if (!status) return;
+    const text = document.getElementById('updateText');
+    const box = document.getElementById('updateBox');
+    const check = document.getElementById('updateCheck');
+    const install = document.getElementById('updateInstall');
+    const bar = document.getElementById('updateBar');
+    const current = 'Version ' + (status.current || '?');
+    box.classList.toggle('ready', status.state === 'ready');
+    install.hidden = status.state !== 'ready';
+    check.hidden = status.state === 'ready';
+    check.disabled = status.state === 'checking' || status.state === 'downloading';
+    bar.hidden = status.state !== 'downloading';
+    if (status.state === 'downloading') bar.firstChild.style.width = Math.max(2, status.percent || 0) + '%';
+    const when = status.checkedAt ? ' (checked ' + new Date(status.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ')' : '';
+    text.textContent = {
+      checking: current + ' · checking for updates…',
+      none: current + ' · up to date' + when,
+      downloading: current + ' · downloading ' + (status.version || 'the update') + '… ' + (status.percent || 0) + '%',
+      ready: 'Version ' + status.version + ' is ready. Restart to update (takes a few seconds).',
+      error: current + ' · ' + (status.error || 'the update check failed'),
+      unsupported: current + ' · ' + (status.error || 'updates work in the installed app')
+    }[status.state] || current;
   }
 
   /** A failed download, in words someone can act on, with a way to dismiss it. */

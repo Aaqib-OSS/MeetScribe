@@ -94,6 +94,12 @@
     .notice.error { color: #ffcfcb; background: rgba(255,90,80,0.10); border-color: rgba(255,90,80,0.35); }
     .notice.ok { color: #c4f5da; background: rgba(110,231,168,0.10); border-color: rgba(110,231,168,0.35); }
     .model-error { margin-top: 0; }
+    .update-box { display: flex; align-items: center; gap: 8px; margin: -2px 0 6px; padding: 6px 8px;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--field); font-size: 11px; }
+    .update-box #updateText { flex: 1; min-width: 0; color: var(--muted); }
+    .update-box.ready { border-color: rgba(110,231,168,0.45); }
+    .update-box.ready #updateText { color: #c4f5da; }
+    .update-actions { display: flex; gap: 6px; }
     .notice-close { background: none; border: none; color: inherit; cursor: pointer; font-size: 11px;
       padding: 0 2px; opacity: 0.7; -webkit-app-region: no-drag; }
     .notice-close:hover { opacity: 1; }
@@ -322,8 +328,16 @@
 
         <div class="check">
           <input type="checkbox" id="autoUpdate" />
-          <label for="autoUpdate">Check GitHub for updates on launch (installed builds only)</label>
+          <label for="autoUpdate">Update automatically (checks GitHub at launch and every few hours, downloads in the background)</label>
         </div>
+        <div class="update-box" id="updateBox">
+          <span id="updateText">Version …</span>
+          <span class="update-actions">
+            <button class="action" id="updateCheck">Check for updates</button>
+            <button class="action primary" id="updateInstall" hidden>Restart to update</button>
+          </span>
+        </div>
+        <div class="model-bar" id="updateBar" hidden><span></span></div>
 
         <div class="field">
           <label for="reorderWindowMs">Line-ordering buffer (ms)</label>
