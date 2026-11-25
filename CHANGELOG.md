@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format based on [Keep a
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-25
+
 ### Added
 
 - Settings → Problems lists every warning in full, with Copy for one, Copy all (version included, your user folder and meeting names left out), Clear and Open log folder. The list survives a restart.
