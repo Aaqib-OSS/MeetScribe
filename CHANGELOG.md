@@ -6,7 +6,12 @@ All notable changes to this project are documented here. Format based on [Keep a
 
 ### Added
 
+- Settings → Problems lists every warning in full, with Copy for one, Copy all (version included, your user folder and meeting names left out), Clear and Open log folder. The list survives a restart.
 - While recording, MeetScribe restarts the audio capture when no audio arrives, and warns. Stopping a meeting without any audio says why there is no final transcript.
+
+### Changed
+
+- A warning on the overlay bar is a short "Problem" chip (a red "NOT RECORDING" when nothing is recorded) instead of a cut-off sentence. Click it to read and copy the full text in Settings → Problems.
 
 ### Fixed
 

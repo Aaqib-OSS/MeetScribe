@@ -32,6 +32,7 @@ app.commandLine.appendSwitch("disable-component-update");
 app.commandLine.appendSwitch("disable-domain-reliability");
 app.commandLine.appendSwitch("no-pings");
 
+const { logDir } = require("./src/core/logger");
 const logger = require("./src/core/logger").createServiceLogger("MAIN");
 const config = require("./src/core/config");
 const settingsStore = require("./src/core/settings.store");
@@ -66,6 +67,7 @@ const libraryEdit = require("./src/services/library-edit.service");
 const voiceService = require("./src/services/voice.service");
 const speedStats = require("./src/services/speed-stats.service");
 const { CaptureWatchdog } = require("./src/core/capture-watchdog");
+const problemLog = require("./src/core/problem-log");
 const windowManager = require("./src/managers/window.manager");
 
 // How often a recording is checked for arriving audio, and how many times
@@ -89,6 +91,8 @@ class ApplicationController {
     this.appIcon = "terminal";
     this.audioDevices = { inputs: [] };
     this.captureWatchdog = new CaptureWatchdog();
+    // Warnings shown so far, newest first; loaded on first use.
+    this.problems = null;
     this.watchdogTimer = null;
     // The recording the previous run left unfinished, read once at launch.
     this.unfinishedAtLaunch = "";
@@ -554,7 +558,7 @@ class ApplicationController {
     });
 
     transcriptionService.on("error", (message) => {
-      windowManager.broadcastToAllWindows("transcription-error", { message });
+      this.warnUser(message);
     });
 
     // Lines are broadcast only once they are actually on disk, so the UI order
@@ -564,9 +568,7 @@ class ApplicationController {
     });
 
     meetingService.on("write-error", (message) => {
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: `Could not write the transcript: ${message}`,
-      });
+      this.warnUser(`Could not write the transcript: ${message}`);
     });
 
     // The final pass runs for minutes after the meeting ends. Surface it, or it
@@ -606,13 +608,54 @@ class ApplicationController {
         message: `Final pass failed: ${payload.error}`,
         ...payload,
       });
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: `Final pass failed: ${payload.error}`,
-      });
+      this.warnUser(`Final pass failed: ${payload.error}`);
     });
   }
 
   // ── Recording lifecycle ──
+
+  // ── Problems (Settings > Problems) ──
+
+  problemsFile() {
+    return settingsStore.userDataFile("problems.json");
+  }
+
+  listProblems() {
+    if (!this.problems) {
+      try {
+        this.problems = problemLog.normalize(JSON.parse(fs.readFileSync(this.problemsFile(), "utf8")));
+      } catch (_) {
+        this.problems = []; // none yet, or unreadable
+      }
+    }
+    return this.problems;
+  }
+
+  recordProblem(message) {
+    const text = problemLog.redact(message, {
+      transcriptRoot: settingsStore.get("transcriptRoot"),
+      home: app.getPath("home"),
+    });
+    this.saveProblems(problemLog.add(this.listProblems(), text, Date.now()));
+  }
+
+  saveProblems(list) {
+    this.problems = list;
+    try {
+      fs.writeFileSync(this.problemsFile(), JSON.stringify(list, null, 2), "utf8");
+    } catch (error) {
+      logger.error("Could not save the problem list", { error: error.message });
+    }
+    windowManager.broadcastToAllWindows("problems-changed", list);
+  }
+
+  /** The whole list as text, with what a bug report needs to make sense of it. */
+  problemsText() {
+    return problemLog.toText(
+      this.listProblems(),
+      `MeetScribe ${config.get("app.version")}, ${process.platform} ${process.getSystemVersion()}, Electron ${process.versions.electron}`
+    );
+  }
 
   /**
    * A warning for the user. While a recording is starting, warnings are held
@@ -622,6 +665,8 @@ class ApplicationController {
    */
   warnUser(message) {
     logger.warn(message);
+    // Kept at once, so it is in Settings > Problems even if no window shows it.
+    this.recordProblem(message);
     if (this.startWarnings) this.startWarnings.push(message);
     else windowManager.broadcastToAllWindows("transcription-error", { message });
   }
@@ -1016,10 +1061,10 @@ class ApplicationController {
       });
       if (!meta) return;
       logger.warn("Recovered a recording that was not stopped cleanly", { streams: meta.streams.length });
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: "The last recording was cut off (the app closed while recording). Its audio is saved" +
-          (settingsStore.get("offlinePassEnabled") && transcriptionService.isAvailable() ? " and its final transcript is being made." : "; re-run it from the Library."),
-      });
+      this.warnUser(
+        "The last recording was cut off (the app closed while recording). Its audio is saved" +
+          (settingsStore.get("offlinePassEnabled") && transcriptionService.isAvailable() ? " and its final transcript is being made." : "; re-run it from the Library.")
+      );
       if (settingsStore.get("offlinePassEnabled") && transcriptionService.isAvailable()) {
         this.rerunFinalPass(folder).catch((error) => logger.error("Could not queue the recovered recording", { error: error.message }));
       }
@@ -1146,9 +1191,7 @@ class ApplicationController {
       return { ok: true, filename: saved.filename };
     } catch (error) {
       logger.error("Screenshot failed", { error: error.message });
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: `Screenshot failed: ${error.message}`,
-      });
+      this.warnUser(`Screenshot failed: ${error.message}`);
       return { ok: false, error: error.message };
     }
   }
@@ -1183,12 +1226,13 @@ class ApplicationController {
     }
   }
 
-  showSettings() {
+  showSettings(page = null) {
     windowManager.showSettings();
     const settingsWindow = windowManager.getWindow("settings");
     if (settingsWindow) {
       setTimeout(() => {
         settingsWindow.webContents.send("load-settings", this.getSettings());
+        if (page) settingsWindow.webContents.send("settings-open-page", page);
       }, 100);
     }
   }
@@ -1523,7 +1567,15 @@ class ApplicationController {
     // ── Updates ──
     ipcMain.handle("update:status", () => this.updateStatus());
     ipcMain.handle("update:check", () => this.checkForUpdates({ manual: true }));
-    ipcMain.handle("update:install", () => this.installUpdate());
+    ipcMain.handle("update:install", () => {
+      const result = this.installUpdate();
+      if (result && result.ok === false) this.warnUser(result.error);
+      return result;
+    });
+    ipcMain.handle("problems:list", () => this.listProblems());
+    ipcMain.handle("problems:text", () => this.problemsText());
+    ipcMain.handle("problems:clear", () => this.saveProblems([]));
+    ipcMain.handle("problems:open-logs", () => shell.openPath(logDir));
     ipcMain.handle("models:list", () => this.listModels());
     ipcMain.handle("models:download", (_event, id) => this.downloadModel(id));
     ipcMain.handle("models:delete", (_event, id) => this.deleteModel(id));
@@ -1547,10 +1599,10 @@ class ApplicationController {
       return { ok: true };
     });
     ipcMain.on("setup:close", () => windowManager.closeSetup());
-    // The overlay's warning: the assistant while Whisper is missing, else Settings.
-    ipcMain.handle("show-help-for-warning", async () => {
-      if (!transcriptionService.getStatus().configured) await windowManager.showSetup();
-      else this.showSettings();
+    // The overlay's warning: the assistant while Whisper is missing, else the full text.
+    ipcMain.handle("show-help-for-warning", async (_event, kind) => {
+      if (kind === "setup" && !transcriptionService.getStatus().configured) await windowManager.showSetup();
+      else this.showSettings("problems");
       return { ok: true };
     });
 

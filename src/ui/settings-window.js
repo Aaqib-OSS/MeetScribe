@@ -135,10 +135,63 @@ class SettingsWindow {
     this.bindVoice();
     this.bindEvents();
     this.bindProfileEditor();
+    this.bindProblems();
     this.load();
     this.loadModels();
     this.loadProfiles();
     this.refreshVoice();
+  }
+
+  // ── Problems ──
+
+  bindProblems() {
+    const copy = async (button, text) => {
+      const label = button.textContent;
+      const ok = await window.electronAPI.copyToClipboard(text);
+      button.textContent = ok ? 'Copied' : 'Copy failed';
+      setTimeout(() => { button.textContent = label; }, 1500);
+    };
+    const render = (list) => {
+      const tab = document.getElementById('problemsTab');
+      tab.textContent = list.length ? `Problems (${list.length})` : 'Problems';
+      const box = document.getElementById('problemList');
+      box.replaceChildren();
+      if (!list.length) {
+        box.appendChild(chip('hint', 'No problems.'));
+        return;
+      }
+      for (const entry of list) {
+        const row = document.createElement('div');
+        row.className = 'problem';
+        const main = document.createElement('div');
+        main.className = 'problem-main';
+        const time = document.createElement('div');
+        time.className = 'problem-time';
+        time.textContent = new Date(entry.lastAt).toLocaleString() + (entry.count > 1 ? ` · ${entry.count} times` : '');
+        const text = document.createElement('div');
+        text.className = 'problem-text';
+        text.textContent = entry.message;
+        main.append(time, text);
+        const button = document.createElement('button');
+        button.className = 'action';
+        button.textContent = 'Copy';
+        button.addEventListener('click', () => copy(button, entry.message));
+        row.append(main, button);
+        box.appendChild(row);
+      }
+    };
+
+    const copyAll = document.getElementById('copyProblems');
+    copyAll.addEventListener('click', async () => copy(copyAll, await window.electronAPI.getProblemsText()));
+    document.getElementById('clearProblems').addEventListener('click', () => window.electronAPI.clearProblems());
+    document.getElementById('openLogs').addEventListener('click', () => window.electronAPI.openLogFolder());
+    window.electronAPI.onProblemsChanged(render);
+    window.electronAPI.listProblems().then(render).catch(() => {});
+    // Opened from the overlay's warning. Not remembered as the last used tab.
+    window.electronAPI.onSettingsOpenPage((page) => {
+      const tab = document.querySelector('.tab[data-page="' + page + '"]');
+      if (tab) this.showTab(tab);
+    });
   }
 
   bindTabs() {
@@ -148,6 +201,7 @@ class SettingsWindow {
       tab.classList.add('active');
       document.getElementById(`page-${tab.dataset.page}`).classList.add('active');
     };
+    this.showTab = show;
     document.querySelectorAll('.tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         show(tab);
