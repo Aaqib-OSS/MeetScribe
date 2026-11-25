@@ -43,18 +43,19 @@ class MainWindowUI {
     // on the dot, the overlay takes clicks again so the dot can be clicked.
     this.status.addEventListener('mouseenter', () => window.electronAPI.dotHover(true));
     this.status.addEventListener('mouseleave', () => window.electronAPI.dotHover(false));
-    // While Whisper is missing this opens the setup assistant, else Settings.
-    this.warn.addEventListener('click', () => window.electronAPI.showHelpForWarning());
+    // While Whisper is missing this opens the setup assistant, else the full
+    // text in Settings > Problems. Once read there, the chip has done its job.
+    this.warn.addEventListener('click', () => {
+      window.electronAPI.showHelpForWarning(this.warningKind);
+      if (this.warningKind === 'other') this.setWarning('');
+    });
     this.final.addEventListener('click', () => window.electronAPI.openMeetingFolder());
     this.bindGrip(document.getElementById('grip'));
 
     // A downloaded update shows as a small green button; clicking restarts
     // into it (refused, with a reason, while recording).
     this.updateBtn = document.getElementById('updateBtn');
-    this.updateBtn.addEventListener('click', async () => {
-      const result = await window.electronAPI.installUpdate();
-      if (result && result.ok === false) this.setWarning(result.error);
-    });
+    this.updateBtn.addEventListener('click', () => window.electronAPI.installUpdate());
     window.electronAPI.onUpdateStatus((status) => this.setUpdate(status));
     window.electronAPI.getUpdateStatus().then((status) => this.setUpdate(status)).catch(() => {});
   }
@@ -241,9 +242,13 @@ class MainWindowUI {
 
   setWarning(message, kind = 'other') {
     this.warningKind = message ? kind : null;
-    this.warn.textContent = message || '';
-    this.warn.title = message ? message + ' (click for help)' : '';
+    // The bar has no room for a sentence: a short chip, the rest one click away.
+    const alert = Boolean(message) && message.startsWith('NOT RECORDING');
+    const chip = kind === 'setup' ? message : alert ? 'NOT RECORDING' : 'Problem';
+    this.warn.textContent = message ? chip : '';
+    this.warn.title = message ? message + ' (click for details)' : '';
     this.warn.classList.toggle('show', !!message);
+    this.warn.classList.toggle('alert', alert);
     this.resizeToContent();
   }
 

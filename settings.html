@@ -32,7 +32,7 @@
     main::-webkit-scrollbar { width: 8px; }
     main::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 4px; }
 
-    .tabs { display: flex; gap: 2px; padding: 8px 12px 0; flex: 0 0 auto; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 8px 12px 0; flex: 0 0 auto; }
     .tab { -webkit-app-region: no-drag; background: transparent; border: none;
       border-bottom: 2px solid transparent; color: var(--muted); cursor: pointer;
       font-family: inherit; font-size: 11px; padding: 4px 8px; }
@@ -94,6 +94,12 @@
     .notice.error { color: #ffcfcb; background: rgba(255,90,80,0.10); border-color: rgba(255,90,80,0.35); }
     .notice.ok { color: #c4f5da; background: rgba(110,231,168,0.10); border-color: rgba(110,231,168,0.35); }
     .model-error { margin-top: 0; }
+    .problem { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; margin-top: 6px;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--field); }
+    .problem-main { flex: 1; min-width: 0; }
+    .problem-time { font-size: 10px; color: var(--muted); }
+    .problem-text { font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
+      -webkit-user-select: text; user-select: text; }
     .update-box { display: flex; align-items: center; gap: 8px; margin: -2px 0 6px; padding: 6px 8px;
       border: 1px solid var(--border); border-radius: 6px; background: var(--field); font-size: 11px; }
     .update-box #updateText { flex: 1; min-width: 0; color: var(--muted); }
@@ -230,6 +236,7 @@
       <button class="tab" data-page="whisper">Transcription</button>
       <button class="tab" data-page="final">Final pass</button>
       <button class="tab" data-page="appearance">Appearance</button>
+      <button class="tab" data-page="problems" id="problemsTab">Problems</button>
     </div>
 
     <main>
@@ -716,6 +723,18 @@
         <div class="field">
           <button class="action" id="restartApp">Restart app</button>
         </div>
+      </section>
+
+      <!-- Problems -->
+      <section class="page" id="page-problems">
+        <div class="field row">
+          <button class="action primary" id="copyProblems">Copy all</button>
+          <button class="action" id="clearProblems">Clear</button>
+          <button class="action" id="openLogs">Open log folder</button>
+        </div>
+        <div class="hint">Warnings MeetScribe has shown, newest first. They stay on this PC. Your user folder and meeting
+          names are left out of what you copy. The log files are not cleaned up like that.</div>
+        <div id="problemList"></div>
       </section>
     </main>
 

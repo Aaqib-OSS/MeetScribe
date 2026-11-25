@@ -64,3 +64,19 @@ test('a cleanly stopped recording is left alone, and an empty one gives nothing'
   fs.rmSync(folder, { recursive: true, force: true });
   fs.rmSync(empty, { recursive: true, force: true });
 });
+
+test('the meeting being recorded is never recovered', async () => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'meetscribe-live-'));
+  archive.start(folder);
+  try {
+    archive.write('mic', Buffer.alloc(32000));
+    assert.equal(archive.isRecordingTo(folder + path.sep), true);
+    assert.equal(archive.isRecordingTo(folder + '-2'), false);
+    assert.equal(archive.recover(folder), null);
+    assert.equal(fs.existsSync(path.join(folder, 'audio', 'meta.json')), false);
+  } finally {
+    await archive.stop();
+  }
+  assert.equal(archive.isRecordingTo(folder), false);
+  fs.rmSync(folder, { recursive: true, force: true });
+});

@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Format based on [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Problems lists every warning in full, with Copy for one, Copy all (version included, your user folder and meeting names left out), Clear and Open log folder. The list survives a restart.
+- While recording, MeetScribe restarts the audio capture when no audio arrives, and warns. Stopping a meeting without any audio says why there is no final transcript.
+
+### Changed
+
+- A warning on the overlay bar is a short "Problem" chip (a red "NOT RECORDING" when nothing is recorded) instead of a cut-off sentence. Click it to read and copy the full text in Settings → Problems.
+
+### Fixed
+
+- Pressing Record within the first seconds after launch could make crash recovery treat the live meeting as a crashed one, compress its first second and delete the audio still being recorded. Recovery only touches the recording left by the previous run, and a meeting being recorded is never given a final pass.
+- A recording whose audio capture could not start looked like it was recording. Record is refused, or stopped at once, with a "NOT RECORDING" warning.
+- Record was clickable before the audio engine was ready on a slow start. The audio engine now starts first.
+- A WAV is deleted only when its FLAC holds all of the audio, and only one final pass per meeting runs at a time.
+
 ## [1.6.0] - 2026-11-21
 
 ### Added

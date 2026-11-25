@@ -32,6 +32,7 @@ app.commandLine.appendSwitch("disable-component-update");
 app.commandLine.appendSwitch("disable-domain-reliability");
 app.commandLine.appendSwitch("no-pings");
 
+const { logDir } = require("./src/core/logger");
 const logger = require("./src/core/logger").createServiceLogger("MAIN");
 const config = require("./src/core/config");
 const settingsStore = require("./src/core/settings.store");
@@ -65,7 +66,14 @@ const phoneServer = require("./src/services/phone-server.service");
 const libraryEdit = require("./src/services/library-edit.service");
 const voiceService = require("./src/services/voice.service");
 const speedStats = require("./src/services/speed-stats.service");
+const { CaptureWatchdog } = require("./src/core/capture-watchdog");
+const problemLog = require("./src/core/problem-log");
 const windowManager = require("./src/managers/window.manager");
+
+// How often a recording is checked for arriving audio, and how many times
+// capture is restarted before only the warning stays.
+const WATCHDOG_INTERVAL_MS = 3000;
+const MAX_CAPTURE_RESTARTS = 3;
 
 /** Why an update check failed, in words a user can act on. */
 function friendlyUpdateError(error) {
@@ -82,6 +90,14 @@ class ApplicationController {
     this.starting = false;
     this.appIcon = "terminal";
     this.audioDevices = { inputs: [] };
+    this.captureWatchdog = new CaptureWatchdog();
+    // Warnings shown so far, newest first; loaded on first use.
+    this.problems = null;
+    this.watchdogTimer = null;
+    // The recording the previous run left unfinished, read once at launch.
+    this.unfinishedAtLaunch = "";
+    // folder -> promise of a running final pass, including its FLAC step.
+    this.finalPasses = new Map();
     // Started from the library shortcut: the manager only, no overlay.
     this.libraryOnly = process.argv.includes("--library");
     this.overlayCreated = false;
@@ -164,6 +180,9 @@ class ApplicationController {
 
     settingsStore.load();
     this.appIcon = settingsStore.get("appIcon") || "terminal";
+    // Read before any recording can start: Record overwrites the setting with
+    // the live meeting, which recovery must never touch.
+    this.unfinishedAtLaunch = settingsStore.get("unfinishedRecording") || "";
 
     logger.info("Application starting", {
       version: config.get("app.version"),
@@ -207,8 +226,10 @@ class ApplicationController {
       this.checkForUpdates();
       // After the UI is up: a resumed pass is background work and can wait.
       setTimeout(() => {
-        this.recoverUnfinishedRecording();
+        // Pending first: recovery queues a pass, which would be read straight
+        // back from the pending file and queued a second time.
         this.resumePendingFinalPasses();
+        this.recoverUnfinishedRecording();
       }, 5000);
     } catch (error) {
       this.starting = false;
@@ -537,7 +558,7 @@ class ApplicationController {
     });
 
     transcriptionService.on("error", (message) => {
-      windowManager.broadcastToAllWindows("transcription-error", { message });
+      this.warnUser(message);
     });
 
     // Lines are broadcast only once they are actually on disk, so the UI order
@@ -547,9 +568,7 @@ class ApplicationController {
     });
 
     meetingService.on("write-error", (message) => {
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: `Could not write the transcript: ${message}`,
-      });
+      this.warnUser(`Could not write the transcript: ${message}`);
     });
 
     // The final pass runs for minutes after the meeting ends. Surface it, or it
@@ -589,13 +608,54 @@ class ApplicationController {
         message: `Final pass failed: ${payload.error}`,
         ...payload,
       });
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: `Final pass failed: ${payload.error}`,
-      });
+      this.warnUser(`Final pass failed: ${payload.error}`);
     });
   }
 
   // ── Recording lifecycle ──
+
+  // ── Problems (Settings > Problems) ──
+
+  problemsFile() {
+    return settingsStore.userDataFile("problems.json");
+  }
+
+  listProblems() {
+    if (!this.problems) {
+      try {
+        this.problems = problemLog.normalize(JSON.parse(fs.readFileSync(this.problemsFile(), "utf8")));
+      } catch (_) {
+        this.problems = []; // none yet, or unreadable
+      }
+    }
+    return this.problems;
+  }
+
+  recordProblem(message) {
+    const text = problemLog.redact(message, {
+      transcriptRoot: settingsStore.get("transcriptRoot"),
+      home: app.getPath("home"),
+    });
+    this.saveProblems(problemLog.add(this.listProblems(), text, Date.now()));
+  }
+
+  saveProblems(list) {
+    this.problems = list;
+    try {
+      fs.writeFileSync(this.problemsFile(), JSON.stringify(list, null, 2), "utf8");
+    } catch (error) {
+      logger.error("Could not save the problem list", { error: error.message });
+    }
+    windowManager.broadcastToAllWindows("problems-changed", list);
+  }
+
+  /** The whole list as text, with what a bug report needs to make sense of it. */
+  problemsText() {
+    return problemLog.toText(
+      this.listProblems(),
+      `MeetScribe ${config.get("app.version")}, ${process.platform} ${process.getSystemVersion()}, Electron ${process.versions.electron}`
+    );
+  }
 
   /**
    * A warning for the user. While a recording is starting, warnings are held
@@ -605,6 +665,8 @@ class ApplicationController {
    */
   warnUser(message) {
     logger.warn(message);
+    // Kept at once, so it is in Settings > Problems even if no window shows it.
+    this.recordProblem(message);
     if (this.startWarnings) this.startWarnings.push(message);
     else windowManager.broadcastToAllWindows("transcription-error", { message });
   }
@@ -665,6 +727,21 @@ class ApplicationController {
       }
     }
 
+    // Nothing is created until audio can be captured: a meeting that looks like
+    // it is recording while it is not loses the whole meeting.
+    const enabled = transcriptionService.getEnabledStreams();
+    if (!enabled.system && !enabled.mic) {
+      this.warnUser("NOT RECORDING: system audio and microphone are both turned off in Settings.");
+      return null;
+    }
+    try {
+      await windowManager.ensureAudioWindow();
+    } catch (error) {
+      logger.error("Recording refused: audio engine not ready", { error: error.message });
+      this.warnUser("NOT RECORDING: MeetScribe is still starting. Press Record again in a moment.");
+      return null;
+    }
+
     let status;
     try {
       status = meetingService.start();
@@ -692,7 +769,11 @@ class ApplicationController {
     }
 
     transcriptionService.start();
-    await this.startAudioCapture();
+    if (!(await this.startAudioCapture()) && !(await this.startAudioCapture())) {
+      await this.abortRecording();
+      return null;
+    }
+    this.startCaptureWatchdog();
 
     windowManager.handleRecordingStarted({
       showTranscript: settingsStore.get("showTranscriptOnRecord") !== false,
@@ -701,6 +782,60 @@ class ApplicationController {
     managerServer.broadcast("library", { reason: "meeting-started" });
     logger.info("Recording started", { folder: status.folder });
     return status;
+  }
+
+  /** Capture never started: close what was opened instead of pretending to record. */
+  async abortRecording() {
+    await this.stopAudioCapture();
+    await transcriptionService.stop();
+    await audioArchive.stop();
+    const status = await meetingService.stop();
+    settingsStore.update({ unfinishedRecording: "" });
+    windowManager.handleRecordingStopped();
+    windowManager.broadcastToAllWindows("meeting-stopped", status);
+    managerServer.broadcast("library", { reason: "meeting-stopped" });
+    logger.error("Recording aborted: no audio could be captured", { folder: status.folder });
+    this.warnUser("NOT RECORDING: no audio could be captured. Check the audio devices and press Record again.");
+  }
+
+  /** While recording: restart capture when audio stops arriving, and say so. */
+  startCaptureWatchdog() {
+    this.stopCaptureWatchdog();
+    this.captureWatchdog.start(Date.now());
+    let restarts = 0;
+    let busy = false;
+    const timer = setInterval(async () => {
+      if (busy || this.recordingTransition || !transcriptionService.isRecording) return;
+      if (!this.captureWatchdog.check(Date.now())) return;
+      busy = true;
+      try {
+        if (restarts >= MAX_CAPTURE_RESTARTS) {
+          this.stopCaptureWatchdog();
+          this.warnUser("NOT RECORDING: no audio is arriving. Stop and press Record again.");
+          return;
+        }
+        restarts += 1;
+        logger.error("No audio is arriving; restarting capture", { attempt: restarts });
+        this.warnUser("No audio was arriving. Restarting the audio capture.");
+        await this.startAudioCapture();
+        if (this.watchdogTimer === timer) {
+          // Give the new capture its full grace period.
+          this.captureWatchdog.start(Date.now());
+        } else if (!transcriptionService.isRecording) {
+          // Stopped while capture was starting: do not leave it running.
+          await this.stopAudioCapture();
+        }
+      } finally {
+        busy = false;
+      }
+    }, WATCHDOG_INTERVAL_MS);
+    this.watchdogTimer = timer;
+  }
+
+  stopCaptureWatchdog() {
+    clearInterval(this.watchdogTimer);
+    this.watchdogTimer = null;
+    this.captureWatchdog.stop();
   }
 
   async stopRecording() {
@@ -723,6 +858,7 @@ class ApplicationController {
   }
 
   async _stopRecording() {
+    this.stopCaptureWatchdog();
     await this.stopAudioCapture();
     // Stop transcription after capture so buffered audio still gets flushed.
     await transcriptionService.stop();
@@ -735,6 +871,9 @@ class ApplicationController {
     windowManager.broadcastToAllWindows("meeting-stopped", status);
     managerServer.broadcast("library", { reason: "meeting-stopped" });
     logger.info("Recording stopped", { folder: status.folder });
+    if (!archive && settingsStore.get("archiveAudio")) {
+      this.warnUser("No audio was recorded in this meeting, so there is no final transcript.");
+    }
 
     // The final pass runs in the background: it takes minutes, and nothing in
     // the app is waiting on it. The live transcript is already on disk.
@@ -751,7 +890,28 @@ class ApplicationController {
    * The second pass over the archived audio. Broadcasts progress so the overlay
    * can show it, then compresses the archive once the transcript exists.
    */
-  async runFinalPass({ folder, meta, events = [], overrides = {} }) {
+  async runFinalPass(job) {
+    if (this.isLiveFolder(job.folder)) {
+      return { ok: false, error: "This meeting is still being recorded" };
+    }
+    // One per folder, FLAC step included: two would compress and delete the
+    // same WAVs at the same time.
+    const key = path.resolve(job.folder);
+    const running = this.finalPasses.get(key);
+    if (running) return running;
+    const pass = this._runFinalPass(job).finally(() => this.finalPasses.delete(key));
+    this.finalPasses.set(key, pass);
+    return pass;
+  }
+
+  /** The meeting being recorded (or still being closed) right now. */
+  isLiveFolder(folder) {
+    if (!folder) return false;
+    if (audioArchive.isRecordingTo(folder)) return true;
+    return meetingService.isActive() && path.resolve(meetingService.folder) === path.resolve(folder);
+  }
+
+  async _runFinalPass({ folder, meta, events = [], overrides = {} }) {
     // Queued, never refused: a meeting that ends while another pass runs waits
     // its turn instead of silently never getting a final transcript.
     const paths = transcriptionService.getPaths();
@@ -791,7 +951,12 @@ class ApplicationController {
       try {
         const output = await this.runPythonScript(paths.python, paths.transcodeScript, [entry.path, target], paths.env);
         const parsed = JSON.parse(output.trim().split(/\r?\n/).pop() || "{}");
-        if (parsed.ok) {
+        // The script fails when the FLAC is shorter than the WAV; a WAV that
+        // changed since then is still being written and must be kept too.
+        const unchanged = parsed.ok && fs.statSync(entry.path).size === parsed.sourceBytes;
+        if (parsed.ok && !unchanged) {
+          logger.error("The WAV changed while it was compressed; keeping it", { file: entry.path });
+        } else if (parsed.ok) {
           fs.rmSync(entry.path, { force: true });
           entry.path = target;
           logger.info("Archived audio compressed", {
@@ -884,9 +1049,11 @@ class ApplicationController {
    * its final pass, which it would otherwise never get.
    */
   recoverUnfinishedRecording() {
-    const folder = settingsStore.get("unfinishedRecording");
-    if (!folder) return;
-    settingsStore.update({ unfinishedRecording: "" });
+    const folder = this.unfinishedAtLaunch;
+    this.unfinishedAtLaunch = "";
+    if (!folder || this.isLiveFolder(folder)) return;
+    // A recording started meanwhile has put its own folder here; leave that one.
+    if (settingsStore.get("unfinishedRecording") === folder) settingsStore.update({ unfinishedRecording: "" });
     try {
       const meta = audioArchive.recover(folder, {
         system: settingsStore.get("labelSystem") || "Them",
@@ -894,10 +1061,10 @@ class ApplicationController {
       });
       if (!meta) return;
       logger.warn("Recovered a recording that was not stopped cleanly", { streams: meta.streams.length });
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: "The last recording was cut off (the app closed while recording). Its audio is saved" +
-          (settingsStore.get("offlinePassEnabled") && transcriptionService.isAvailable() ? " and its final transcript is being made." : "; re-run it from the Library."),
-      });
+      this.warnUser(
+        "The last recording was cut off (the app closed while recording). Its audio is saved" +
+          (settingsStore.get("offlinePassEnabled") && transcriptionService.isAvailable() ? " and its final transcript is being made." : "; re-run it from the Library.")
+      );
       if (settingsStore.get("offlinePassEnabled") && transcriptionService.isAvailable()) {
         this.rerunFinalPass(folder).catch((error) => logger.error("Could not queue the recovered recording", { error: error.message }));
       }
@@ -988,11 +1155,15 @@ class ApplicationController {
       const result = await windowManager.runInAudioWindow(
         `window.__startCapture(${JSON.stringify(enabled)})`
       );
+      if (!result || (!result.system && !result.mic)) {
+        logger.error("Audio capture started no stream", result || {});
+        return null;
+      }
       logger.info("Audio capture started", result);
       return result;
     } catch (error) {
       logger.error("Audio capture failed to start", { error: error.message });
-      this.warnUser(`Could not start audio capture: ${error.message}. Nothing is being recorded; stop and try again.`);
+      this.warnUser(`Could not start audio capture: ${error.message}.`);
       return null;
     }
   }
@@ -1020,9 +1191,7 @@ class ApplicationController {
       return { ok: true, filename: saved.filename };
     } catch (error) {
       logger.error("Screenshot failed", { error: error.message });
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: `Screenshot failed: ${error.message}`,
-      });
+      this.warnUser(`Screenshot failed: ${error.message}`);
       return { ok: false, error: error.message };
     }
   }
@@ -1057,12 +1226,13 @@ class ApplicationController {
     }
   }
 
-  showSettings() {
+  showSettings(page = null) {
     windowManager.showSettings();
     const settingsWindow = windowManager.getWindow("settings");
     if (settingsWindow) {
       setTimeout(() => {
         settingsWindow.webContents.send("load-settings", this.getSettings());
+        if (page) settingsWindow.webContents.send("settings-open-page", page);
       }, 100);
     }
   }
@@ -1320,6 +1490,7 @@ class ApplicationController {
       if (data && data.buffer) {
         // Voice enrollment listens to the mic while no meeting is recording.
         if (data.streamId === "mic") voiceService.collect(Buffer.from(data.buffer));
+        this.captureWatchdog.mark(Date.now());
         transcriptionService.ingest(data.streamId, Buffer.from(data.buffer));
       }
     });
@@ -1330,9 +1501,8 @@ class ApplicationController {
 
     ipcMain.on("audio-error", (_event, data) => {
       logger.error("Audio capture error", data);
-      windowManager.broadcastToAllWindows("transcription-error", {
-        message: `${data.streamId === "system" ? "System audio" : "Microphone"}: ${data.message}`,
-      });
+      // Held while a recording starts, or "meeting-started" would clear it.
+      this.warnUser(`${data.streamId === "system" ? "System audio" : "Microphone"}: ${data.message}`);
     });
 
     ipcMain.on("audio-started", (_event, info) => {
@@ -1397,7 +1567,15 @@ class ApplicationController {
     // ── Updates ──
     ipcMain.handle("update:status", () => this.updateStatus());
     ipcMain.handle("update:check", () => this.checkForUpdates({ manual: true }));
-    ipcMain.handle("update:install", () => this.installUpdate());
+    ipcMain.handle("update:install", () => {
+      const result = this.installUpdate();
+      if (result && result.ok === false) this.warnUser(result.error);
+      return result;
+    });
+    ipcMain.handle("problems:list", () => this.listProblems());
+    ipcMain.handle("problems:text", () => this.problemsText());
+    ipcMain.handle("problems:clear", () => this.saveProblems([]));
+    ipcMain.handle("problems:open-logs", () => shell.openPath(logDir));
     ipcMain.handle("models:list", () => this.listModels());
     ipcMain.handle("models:download", (_event, id) => this.downloadModel(id));
     ipcMain.handle("models:delete", (_event, id) => this.deleteModel(id));
@@ -1421,10 +1599,10 @@ class ApplicationController {
       return { ok: true };
     });
     ipcMain.on("setup:close", () => windowManager.closeSetup());
-    // The overlay's warning: the assistant while Whisper is missing, else Settings.
-    ipcMain.handle("show-help-for-warning", async () => {
-      if (!transcriptionService.getStatus().configured) await windowManager.showSetup();
-      else this.showSettings();
+    // The overlay's warning: the assistant while Whisper is missing, else the full text.
+    ipcMain.handle("show-help-for-warning", async (_event, kind) => {
+      if (kind === "setup" && !transcriptionService.getStatus().configured) await windowManager.showSetup();
+      else this.showSettings("problems");
       return { ok: true };
     });
 

@@ -107,10 +107,12 @@ class WindowManager {
     logger.info('Initializing application windows', { showMainWindow });
     
     try {
+      // The audio engine comes first: the main window has the Record button, and
+      // on a slow start Record was clickable minutes before capture could run.
+      await this.createAudioWindow();
       await this.createMainWindow({ autoShow: showMainWindow });
       await this.createTranscriptWindow();
       await this.createSettingsWindow();
-      await this.createAudioWindow();
 
       this.setupWindowEventHandlers();
       this.setupScreenTracking();
@@ -1608,13 +1610,18 @@ class WindowManager {
    * NotAllowedError.
    */
   async runInAudioWindow(expression) {
-    if (!this.windows.has('audio')) await this._waitForAudioWindow();
+    const window = await this.ensureAudioWindow();
+    return window.webContents.executeJavaScript(expression, true);
+  }
 
+  /** Resolves once audio can be captured; rejects when the engine never came up. */
+  async ensureAudioWindow() {
+    if (!this.windows.has('audio')) await this._waitForAudioWindow();
     const window = this.windows.get('audio');
     if (!window || window.isDestroyed()) {
       throw new Error('Audio engine window is not available');
     }
-    return window.webContents.executeJavaScript(expression, true);
+    return window;
   }
 
   _waitForAudioWindow(timeoutMs = 10000) {
