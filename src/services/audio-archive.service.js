@@ -49,6 +49,11 @@ class AudioArchiveService {
     return this.active;
   }
 
+  /** True while this meeting's WAVs are open for writing. */
+  isRecordingTo(folder) {
+    return Boolean(this.active && this.folder && folder && path.resolve(folder) === path.resolve(this.folder));
+  }
+
   /**
    * Begin archiving into <meetingFolder>/audio. Writers are created lazily on
    * the first chunk, so a disabled stream leaves no empty file behind.
@@ -246,6 +251,8 @@ class AudioArchiveService {
    * written, or null when there is nothing to recover or it was stopped cleanly.
    */
   recover(meetingFolder, labels = {}) {
+    // The live meeting looks exactly like a crashed one: WAVs, no meta.json.
+    if (this.isRecordingTo(meetingFolder)) return null;
     const audioDir = path.join(meetingFolder, 'audio');
     const metaPath = path.join(audioDir, 'meta.json');
     if (fs.existsSync(metaPath)) {

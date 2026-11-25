@@ -22,9 +22,12 @@ import sys
 def transcode(src, dst):
     import av
 
+    samples = 0
+
     with av.open(src) as container:
         in_stream = container.streams.audio[0]
         sample_rate = in_stream.codec_context.sample_rate
+        channels = in_stream.codec_context.channels
 
         with av.open(dst, mode='w') as output:
             # s16 keeps this bit-exact: the source is already 16-bit integer PCM,
@@ -34,12 +37,20 @@ def transcode(src, dst):
             out_stream.layout = 'mono'
 
             for frame in container.decode(audio=0):
+                samples += frame.samples
                 frame.pts = None
                 for packet in out_stream.encode(frame):
                     output.mux(packet)
 
             for packet in out_stream.encode(None):
                 output.mux(packet)
+
+    # The header can claim less audio than the file holds (a recording still in
+    # progress, or one that crashed). The caller deletes the WAV on success, so
+    # a FLAC that does not cover it is a failure. Half a second of slack.
+    expected = (os.path.getsize(src) - 44) // (2 * channels)
+    if samples < expected - sample_rate // 2:
+        raise ValueError('FLAC would hold %d of %d samples' % (samples, expected))
 
     return os.path.getsize(dst)
 
@@ -50,8 +61,11 @@ def main():
         return 2
 
     src, dst = sys.argv[1], sys.argv[2]
+    # Written aside first, so a failure never removes a good FLAC already there.
+    part = dst + '.part.flac'
     try:
-        size = transcode(src, dst)
+        size = transcode(src, part)
+        os.replace(part, dst)
         print(json.dumps({
             'ok': True,
             'path': dst,
@@ -63,8 +77,8 @@ def main():
         # A failed transcode must never cost the archive: the caller keeps the
         # WAV whenever this reports failure.
         try:
-            if os.path.exists(dst):
-                os.remove(dst)
+            if os.path.exists(part):
+                os.remove(part)
         except OSError:
             pass
         print(json.dumps({'ok': False, 'error': str(exc)}))
